@@ -2,16 +2,28 @@
 name = "dala-agent"
 version = "0.1.0"
 description = "ИИ-сотрудник для дистрибьютора: text-to-SQL по данным 1С, RAG по регламентам, действия в Битрикс24 (демо-кейс)"
-readme = "../README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
-dependencies = []  # зависимости агента (LangGraph, FastAPI, psycopg и т.д.) добавляются на этапе 2
+dependencies = [
+    "langgraph>=1.0,<2",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "psycopg[binary]>=3.2",
+    "sqlglot>=26",
+    "anthropic>=0.40",
+    "openai>=1.50",
+    "httpx>=0.27",
+    "pyyaml>=6",
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pyyaml>=6", "ruff>=0.6"]
+dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
 dala-demo-data = "dala_agent.demo_data.generator:main"
+dala-index = "dala_agent.rag.indexer:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -23,6 +35,7 @@ packages = ["src/dala_agent"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = ["db: интеграционные тесты с Postgres + pgvector (нужен TEST_DATABASE_URL)"]
 
 [tool.ruff]
 line-length = 120

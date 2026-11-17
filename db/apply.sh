@@ -23,7 +23,7 @@ run() { echo "→ $1"; "${PSQL[@]}" "${@:2}" -f "$SQL_DIR/$1"; }
 
 run 001_erp.sql
 run 002_analytics.sql
-if [[ "${SKIP_KB:-0}" != "1" ]]; then run 003_kb.sql; else echo "→ 003_kb.sql пропущен (SKIP_KB=1)"; fi
+if [[ "${SKIP_KB:-0}" != "1" ]]; then run 003_kb.sql; run 005_kb_embedding_model.sql; else echo "→ 003_kb.sql пропущен (SKIP_KB=1)"; fi
 run 004_agent_role.sql -v agent_password="$AGENT_DB_PASSWORD"
 (cd "$DATA_DIR" && run 010_load_demo.sql)
 echo "Готово: демо-данные загружены."

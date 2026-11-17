@@ -16,7 +16,7 @@
 | Этап | Содержание | Статус |
 |---|---|---|
 | 1 | Структура репозитория, SQL-схема, генератор выгрузки «из 1С», документы для RAG | ✅ готово |
-| 2 | Python-ядро: инструменты, граф LangGraph, API на FastAPI | ⏳ |
+| 2 | Python-ядро: инструменты, граф LangGraph, API на FastAPI — [как устроено](docs/agent.md) | ✅ готово |
 | 3 | Защита (маскирование ПДн, prompt injection, права SQL) и evals | ⏳ |
 | 4 | TypeScript-дашборд: чат, трасса шагов агента, панель качества и стоимости | ⏳ |
 | 5 | Docker, CI (GitHub Actions), деплой демо | ⏳ |
@@ -57,10 +57,22 @@ flowchart LR
 ## Быстрый старт
 
 ```bash
-cp .env.example .env          # заполните POSTGRES_PASSWORD и AGENT_DB_PASSWORD
+cp .env.example .env          # заполните POSTGRES_PASSWORD, AGENT_DB_PASSWORD и ANTHROPIC_API_KEY
+make install                  # backend и зависимости (лучше в виртуальном окружении)
 make db-up                    # Postgres 16 + pgvector, схемы и демо-данные
-make psql-agent               # консоль под ролью агента: только analytics, только чтение
+make index                    # документы → kb (по умолчанию офлайн-эмбеддинги, без ключей)
+make api                      # API на http://127.0.0.1:8000, документация — /docs
 ```
+
+```bash
+curl -s localhost:8000/chat -H 'content-type: application/json' \
+  -d '{"message": "Какая максимальная скидка для HoReCa без согласования?"}'
+```
+
+Действия в Битрикс24 по умолчанию идут в заглушку (`var/bitrix_stub.jsonl`) и выполняются только
+после подтверждения: `POST /chat/{thread_id}/confirm`. Подробнее — [docs/agent.md](docs/agent.md).
+
+Консоль базы под ролью агента (только analytics, только чтение): `make psql-agent`.
 
 ```sql
 SELECT doc_month, round(sum(amount_kzt) / 1e6, 1) AS выручка_млн
@@ -73,15 +85,23 @@ Supabase или свой Postgres: укажите `DATABASE_URL` в `.env` и в
 Перегенерировать данные и прогнать тесты:
 
 ```bash
-make data && make test
+make data && make test        # без базы и сети
+make test-db                  # на живой базе: TEST_DATABASE_URL и TEST_AGENT_DATABASE_URL
 ```
 
 ## Структура
 
 ```
 backend/
-  src/dala_agent/demo_data/   генератор выгрузки «из 1С» (детерминированный)
-  tests/                      инварианты данных и документов
+  src/dala_agent/
+    agent/                    граф LangGraph, промпты, фасад диалога
+    tools/                    text-to-SQL и проверка SQL (sql_guard)
+    rag/                      чанкинг по пунктам, индексатор, гибридный поиск, ответ со ссылками
+    actions/                  Битрикс24 (заглушка и вебхук), справочник сотрудников
+    llm/                      Claude, OpenAI-совместимый API, FakeLLM для тестов
+    api/                      FastAPI
+    demo_data/                генератор выгрузки «из 1С» (детерминированный)
+  tests/                      unit-тесты, граф на заглушках, интеграционные тесты с базой
 db/
   sql/                        схемы erp, analytics, kb; роль agent_reader; загрузка CSV
   apply.sh                    применение к любой базе (docker init, Supabase)
@@ -90,12 +110,14 @@ data/
   documents/                  регламенты и договоры для RAG
   documents_adversarial/      документы с prompt injection для evals
 docs/data_model.md            модель данных и «ловушки» для text-to-SQL
+docs/agent.md                 граф, инструменты, рубежи защиты, API
 ```
 
 ## Стек
 
-Python 3.12, PostgreSQL 16 + pgvector, pytest, ruff. Дальше по плану: LangGraph, FastAPI, Pydantic,
-Claude (по умолчанию) или OpenAI-совместимый API под self-hosted модели, React + Vite + TypeScript.
+Python 3.12, LangGraph, FastAPI, Pydantic, psycopg 3, sqlglot, PostgreSQL 16 + pgvector, pytest, ruff.
+Модели: Claude (по умолчанию) или любой OpenAI-совместимый API под self-hosted модели (vLLM, Ollama).
+Дальше по плану: React + Vite + TypeScript.
 
 ## Лицензия
 
