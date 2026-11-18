@@ -74,6 +74,17 @@ curl -s localhost:8000/chat -H 'content-type: application/json' \
 
 Консоль базы под ролью агента (только analytics, только чтение): `make psql-agent`.
 
+### Windows без make и WSL
+
+Нужны Python 3.12+ и [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+
+1. `setup-windows.bat` — создаёт `.venv`, ставит зависимости, создаёт `.env` со случайными паролями базы
+   и открывает его в Блокноте: впишите `ANTHROPIC_API_KEY` и сохраните.
+2. `start-windows.bat` — запускает Docker Desktop (если не запущен), поднимает базу, индексирует документы
+   и открывает API на http://127.0.0.1:8000/docs.
+
+В папке `windows/` ещё есть `stop.bat` (остановить базу), `test.bat` (тесты) и `reset-db.bat` (пересоздать базу).
+
 ```sql
 SELECT doc_month, round(sum(amount_kzt) / 1e6, 1) AS выручка_млн
 FROM sales WHERE doc_month >= '2026-08-01'

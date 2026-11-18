@@ -1,0 +1,10 @@
+# Файлы, которые выполняются внутри Linux-контейнера Postgres, всегда с LF —
+# иначе Git для Windows (core.autocrlf) сломает bash-скрипты и загрузку CSV.
+*.sh   text eol=lf
+*.sql  text eol=lf
+*.csv  text eol=lf
+*.md   text eol=lf
+*.py   text eol=lf
+# Скрипты Windows — с CRLF
+*.bat  text eol=crlf
+*.ps1  text eol=crlf
