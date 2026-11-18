@@ -3,8 +3,9 @@
 #   start — база в Docker, индексация документов, API на http://127.0.0.1:8000
 #   stop  — остановить базу;  test — тесты;  reset — пересоздать базу с нуля
 #   evals — прогон эталонных вопросов на настоящей модели (тратит токены), отчёт в var\evals
+#   ui    — пересобрать дашборд (нужен Node.js 20.19+); в архиве проекта он уже собран
 param(
-    [ValidateSet('setup', 'start', 'stop', 'test', 'reset', 'evals')]
+    [ValidateSet('setup', 'start', 'stop', 'test', 'reset', 'evals', 'ui')]
     [string]$Command = 'start'
 )
 
@@ -97,6 +98,22 @@ function Ensure-DockerRunning {
     Fail 'Docker Desktop так и не запустился. Откройте его вручную, дождитесь зелёного статуса «Engine running» и повторите.'
 }
 
+function Ensure-Ui([switch]$Force) {
+    $index = Join-Path $Root 'frontend\dist\index.html'
+    if ((Test-Path $index) -and -not $Force) { Ok 'Дашборд собран'; return }
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+        Say '  [!] Дашборд не собран, а Node.js не найден — будет доступен только API (/docs)' 'Yellow'
+        return
+    }
+    Say 'Собираю дашборд (npm)…'
+    Push-Location (Join-Path $Root 'frontend')
+    npm ci --no-audit --no-fund
+    if ($LASTEXITCODE -eq 0) { npm run build }
+    $code = $LASTEXITCODE
+    Pop-Location
+    if ($code -ne 0) { Say '  [!] Сборка дашборда не удалась — API всё равно работает (/docs)' 'Yellow' } else { Ok 'Дашборд собран' }
+}
+
 function Invoke-Setup {
     Say "`n=== Установка ===" 'White'
     $py = Find-Python
@@ -117,6 +134,7 @@ function Invoke-Setup {
     Ok 'Зависимости установлены'
 
     Ensure-EnvFile
+    Ensure-Ui
 
     switch (Test-Docker) {
         'missing' { Say "  [!] Docker Desktop не установлен — он нужен для базы: $DockerUrl" 'Yellow' }
@@ -156,8 +174,10 @@ function Invoke-Start {
     & $VenvPy -m dala_agent.rag.indexer
     if ($LASTEXITCODE -ne 0) { Fail 'Индексация не удалась — смотрите сообщение выше.' }
 
-    Say "`nAPI: http://127.0.0.1:8000/docs  — откроется в браузере. Остановить: Ctrl+C в этом окне." 'Green'
-    Start-Job -ScriptBlock { Start-Sleep -Seconds 5; Start-Process 'http://127.0.0.1:8000/docs' } | Out-Null
+    $hasUi = Test-Path (Join-Path $Root 'frontend\dist\index.html')
+    $url = if ($hasUi) { 'http://127.0.0.1:8000/' } else { 'http://127.0.0.1:8000/docs' }
+    Say "`nДашборд: $url  (API — /docs). Откроется в браузере. Остановить: Ctrl+C в этом окне." 'Green'
+    Start-Job -ScriptBlock { param($u) Start-Sleep -Seconds 5; Start-Process $u } -ArgumentList $url | Out-Null
     & $VenvPy -m uvicorn dala_agent.api.main:create_app --factory --host 127.0.0.1 --port 8000
 }
 
@@ -175,6 +195,7 @@ switch ($Command) {
     'start' { Invoke-Start }
     'stop'  { docker compose stop; Ok 'База остановлена (данные сохранены)' }
     'test'  { Invoke-Test }
+    'ui'    { Ensure-Ui -Force }
     'evals' {
         if (-not (Test-Path $VenvPy)) { Invoke-Setup }
         Ensure-DockerRunning

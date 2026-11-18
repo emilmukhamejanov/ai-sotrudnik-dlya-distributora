@@ -10,6 +10,7 @@ from langgraph.types import Command
 
 from ..config import Settings
 from ..pii import PiiVault
+from ..pricing import Pricing
 from .graph import AgentDeps, build_graph
 
 
@@ -31,16 +32,23 @@ class TurnResult:
 
 
 class Agent:
-    def __init__(self, deps: AgentDeps, *, price_per_mtok: tuple[float, float] | None = None, checkpointer=None):
+    def __init__(
+        self,
+        deps: AgentDeps,
+        *,
+        pricing: Pricing | None = None,
+        price_per_mtok: tuple[float, float] | None = None,
+        checkpointer=None,
+    ):
         self.deps = deps
         self.graph = build_graph(deps, checkpointer=checkpointer)
-        self._price = price_per_mtok
+        self.pricing = pricing or Pricing(override=price_per_mtok)
 
     @classmethod
     def from_settings(cls, settings: Settings, **overrides: Any) -> Agent:
         from .factory import build_deps
 
-        return cls(build_deps(settings, **overrides), price_per_mtok=settings.price())
+        return cls(build_deps(settings, **overrides), pricing=Pricing(override=settings.price()))
 
     def _config(self, thread_id: str) -> dict:
         return {"configurable": {"thread_id": thread_id}}
@@ -117,12 +125,25 @@ class Agent:
         )
 
     def _usage(self, trace: list[dict]) -> dict:
-        total_in = sum((s.get("usage") or {}).get("input_tokens", 0) for s in trace)
-        total_out = sum((s.get("usage") or {}).get("output_tokens", 0) for s in trace)
-        cost = None
-        if self._price:
-            cost = round(total_in / 1e6 * self._price[0] + total_out / 1e6 * self._price[1], 6)
-        return {"input_tokens": total_in, "output_tokens": total_out, "cost_usd": cost}
+        """Токены и стоимость хода — всего и по моделям (роутер дешевле основной модели)."""
+        by_model: dict[str, dict] = {}
+        for s in trace:
+            u = s.get("usage") or {}
+            if not (u.get("input_tokens") or u.get("output_tokens")):
+                continue
+            m = by_model.setdefault(u.get("model") or "?", {"input_tokens": 0, "output_tokens": 0, "calls": 0})
+            m["input_tokens"] += u.get("input_tokens", 0)
+            m["output_tokens"] += u.get("output_tokens", 0)
+            m["calls"] += 1
+        for model, m in by_model.items():
+            c = self.pricing.cost(model, m["input_tokens"], m["output_tokens"])
+            m["cost_usd"] = None if c is None else round(c, 6)
+        return {
+            "input_tokens": sum(m["input_tokens"] for m in by_model.values()),
+            "output_tokens": sum(m["output_tokens"] for m in by_model.values()),
+            "cost_usd": self.pricing.cost_of_steps(trace),
+            "by_model": by_model,
+        }
 
 
 def _public_sql(sql_result: dict | None) -> dict | None:

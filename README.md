@@ -18,7 +18,7 @@
 | 1 | Структура репозитория, SQL-схема, генератор выгрузки «из 1С», документы для RAG | ✅ готово |
 | 2 | Python-ядро: инструменты, граф LangGraph, API на FastAPI — [как устроено](docs/agent.md) | ✅ готово |
 | 3 | Защита (маскирование ПДн, prompt injection, права SQL) и evals — 35 кейсов на Claude, 4 прогона, [подробно](docs/agent.md#evals-этап-3) | ✅ готово |
-| 4 | TypeScript-дашборд: чат, трасса шагов агента, панель качества и стоимости | ⏳ |
+| 4 | TypeScript-дашборд: чат, трасса шагов агента, панель качества и стоимости — [что внутри](docs/dashboard.md) | ✅ готово |
 | 5 | Docker, CI (GitHub Actions), деплой демо | ⏳ |
 
 ## Архитектура (целевая)
@@ -61,7 +61,8 @@ cp .env.example .env          # заполните POSTGRES_PASSWORD, AGENT_DB_P
 make install                  # backend и зависимости (лучше в виртуальном окружении)
 make db-up                    # Postgres 16 + pgvector, схемы и демо-данные
 make index                    # документы → kb (по умолчанию офлайн-эмбеддинги, без ключей)
-make api                      # API на http://127.0.0.1:8000, документация — /docs
+make ui                       # собрать дашборд (нужен Node.js 20.19+)
+make api                      # дашборд на http://127.0.0.1:8000, API-документация — /docs
 ```
 
 ```bash
@@ -81,9 +82,11 @@ curl -s localhost:8000/chat -H 'content-type: application/json' \
 1. `setup-windows.bat` — создаёт `.venv`, ставит зависимости, создаёт `.env` со случайными паролями базы
    и открывает его в Блокноте: впишите `ANTHROPIC_API_KEY` и сохраните.
 2. `start-windows.bat` — запускает Docker Desktop (если не запущен), поднимает базу, индексирует документы
-   и открывает API на http://127.0.0.1:8000/docs.
+   и открывает дашборд на http://127.0.0.1:8000/ (API — /docs). Если дашборд не собран, а Node.js есть,
+   `setup-windows.bat` соберёт его сам.
 
-В папке `windows/` ещё есть `stop.bat` (остановить базу), `test.bat` (тесты) и `reset-db.bat` (пересоздать базу).
+В папке `windows/` ещё есть `stop.bat` (остановить базу), `test.bat` (тесты), `evals.bat` (прогон evals)
+и `reset-db.bat` (пересоздать базу).
 
 ```sql
 SELECT doc_month, round(sum(amount_kzt) / 1e6, 1) AS выручка_млн
@@ -113,6 +116,9 @@ backend/
     api/                      FastAPI
     demo_data/                генератор выгрузки «из 1С» (детерминированный)
   tests/                      unit-тесты, граф на заглушках, интеграционные тесты с базой
+frontend/                     дашборд: React + Vite + TypeScript
+evals/cases.yaml              эталонные вопросы для evals
+windows/                      запуск на Windows без make и WSL
 db/
   sql/                        схемы erp, analytics, kb; роль agent_reader; загрузка CSV
   apply.sh                    применение к любой базе (docker init, Supabase)
@@ -121,14 +127,15 @@ data/
   documents/                  регламенты и договоры для RAG
   documents_adversarial/      документы с prompt injection для evals
 docs/data_model.md            модель данных и «ловушки» для text-to-SQL
-docs/agent.md                 граф, инструменты, рубежи защиты, API
+docs/agent.md                 граф, инструменты, рубежи защиты, evals, API
+docs/dashboard.md             дашборд: чат, путевой лист ответа, качество и расходы
 ```
 
 ## Стек
 
 Python 3.12, LangGraph, FastAPI, Pydantic, psycopg 3, sqlglot, PostgreSQL 16 + pgvector, pytest, ruff.
 Модели: Claude (по умолчанию) или любой OpenAI-совместимый API под self-hosted модели (vLLM, Ollama).
-Дальше по плану: React + Vite + TypeScript.
+Дашборд: React 19, Vite, TypeScript, без UI-библиотек и библиотек графиков.
 
 ## Лицензия
 

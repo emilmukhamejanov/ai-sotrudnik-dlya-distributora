@@ -9,11 +9,16 @@ GET  /health                     — проверка
 GET  /evals/cases                — эталонные вопросы
 POST /evals/run                  — запустить прогон в фоне (тратит токены!)
 GET  /evals/runs/{run_id}        — прогресс и отчёт
+GET  /evals/reports              — сохранённые прогоны (var/evals)
+GET  /meta                       — модели, цены, режим Битрикс24 — для шапки дашборда
+/                                — дашборд (frontend/dist), если собран
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import threading
 import uuid
 from contextlib import asynccontextmanager
@@ -22,10 +27,11 @@ from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..agent.service import Agent
-from ..config import get_settings
+from ..config import REPO_ROOT, get_settings
 from ..llm import LLMError
 
 log = logging.getLogger("dala_agent.api")
@@ -162,7 +168,7 @@ def create_app(agent: Agent | None = None) -> FastAPI:
         def work():
             try:
                 run = run_evals(
-                    agent.deps, agent.deps.sql_tool.executor, cases, price=agent._price, on_progress=progress
+                    agent.deps, agent.deps.sql_tool.executor, cases, pricing=agent.pricing, on_progress=progress
                 )
                 json_path, md_path = save_report(run)
                 state.update(status="done", report=run, markdown=to_markdown(run), saved_to=str(md_path))
@@ -179,8 +185,56 @@ def create_app(agent: Agent | None = None) -> FastAPI:
             raise HTTPException(404, "Нет такого прогона")
         return eval_runs[run_id]
 
+    @app.get("/evals/reports")
+    def eval_reports() -> list[dict]:
+        from ..evals import runner
+
+        out = []
+        for path in sorted(runner.REPORTS_DIR.glob("*.json"), reverse=True):
+            try:
+                run = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            out.append(
+                {"name": path.stem, "started_at": run.get("started_at"), "model": run.get("model"),
+                 "router_model": run.get("router_model"), "duration_s": run.get("duration_s"),
+                 "summary": run.get("summary")}
+            )  # fmt: skip
+        return out
+
+    @app.get("/evals/reports/{name}")
+    def eval_report(name: str) -> dict:
+        from ..evals import runner
+
+        if not re.fullmatch(r"[0-9-]{8,20}", name):
+            raise HTTPException(404, "Нет такого отчёта")
+        path = runner.REPORTS_DIR / f"{name}.json"
+        if not path.exists():
+            raise HTTPException(404, "Нет такого отчёта")
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    @app.get("/meta")
+    def meta(agent: AgentDep) -> dict:
+        deps = agent.deps
+        retriever = getattr(deps.docs_tool, "retriever", None)
+        schema = getattr(deps.sql_tool, "schema", None)
+        return {
+            "demo": True,
+            "model": getattr(deps.llm, "model", None),
+            "router_model": getattr(deps.router_llm, "model", None),
+            "embeddings": getattr(getattr(retriever, "embedder", None), "name", None),
+            "bitrix_mode": getattr(deps.bitrix, "mode", None),
+            "export_date": getattr(schema, "export_date", None),
+            "pricing": agent.pricing.as_dict(),
+        }
+
     @app.get("/chat/{thread_id}/pending")
     def pending(thread_id: str, agent: AgentDep) -> dict:
         return {"thread_id": thread_id, "pending": agent.pending(thread_id)}
 
+    # Дашборд: собранный фронтенд отдаётся тем же сервером — Node.js для запуска не нужен.
+    # Монтируется последним, чтобы маршруты API имели приоритет.
+    dist = REPO_ROOT / "frontend" / "dist"
+    if (dist / "index.html").exists():
+        app.mount("/", StaticFiles(directory=dist, html=True), name="ui")
     return app

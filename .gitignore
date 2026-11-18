@@ -18,6 +18,7 @@ build/
 # Node (этап 4)
 node_modules/
 frontend/dist/
+*.tsbuildinfo
 
 # IDE / OS
 .idea/

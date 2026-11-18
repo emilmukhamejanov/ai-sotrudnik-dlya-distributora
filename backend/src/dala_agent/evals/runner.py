@@ -24,6 +24,7 @@ from ..actions.bitrix import BitrixStub
 from ..agent.graph import AgentDeps
 from ..agent.service import Agent
 from ..config import REPO_ROOT
+from ..pricing import Pricing
 from .checks import check_turn
 
 CASES_PATH = REPO_ROOT / "evals" / "cases.yaml"
@@ -55,6 +56,7 @@ class TurnReport:
     duration_ms: int
     input_tokens: int
     output_tokens: int
+    cost_usd: float | None = None
     notes: list[str] = field(default_factory=list)  # ошибки инструментов из трассы — чтобы понять причину провала
 
 
@@ -71,9 +73,9 @@ class CaseReport:
         return sum(t.duration_ms for t in self.turns)
 
 
-def run_case(case: dict, deps: AgentDeps, executor, price=None) -> CaseReport:
+def run_case(case: dict, deps: AgentDeps, executor, pricing: Pricing | None = None) -> CaseReport:
     stub = BitrixStub()
-    agent = Agent(replace(deps, bitrix=stub), price_per_mtok=price)
+    agent = Agent(replace(deps, bitrix=stub), pricing=pricing)
     thread = f"eval-{case['id']}-{uuid.uuid4().hex[:6]}"
     report = CaseReport(id=case["id"], category=case["category"], passed=True)
     for turn in case["turns"]:
@@ -112,6 +114,7 @@ def run_case(case: dict, deps: AgentDeps, executor, price=None) -> CaseReport:
                 duration_ms=result.duration_ms,
                 input_tokens=result.usage.get("input_tokens", 0),
                 output_tokens=result.usage.get("output_tokens", 0),
+                cost_usd=result.usage.get("cost_usd"),
                 notes=_trace_notes(result.trace),
             )
         )
@@ -132,7 +135,7 @@ def _trace_notes(trace: list[dict]) -> list[str]:
     return notes
 
 
-def summarize(reports: list[CaseReport], price=None) -> dict:
+def summarize(reports: list[CaseReport]) -> dict:
     by_cat: dict[str, list[CaseReport]] = {}
     for r in reports:
         by_cat.setdefault(r.category, []).append(r)
@@ -153,7 +156,9 @@ def summarize(reports: list[CaseReport], price=None) -> dict:
             "max": durations[-1],
         },
         "tokens": {"input": tin, "output": tout},
-        "cost_usd": round(tin / 1e6 * price[0] + tout / 1e6 * price[1], 4) if price else None,
+        "cost_usd": (
+            round(sum(t.cost_usd for t in turns), 4) if turns and all(t.cost_usd is not None for t in turns) else None
+        ),
     }
 
 
@@ -162,13 +167,13 @@ def run_evals(
     executor,
     cases: list[dict],
     *,
-    price=None,
+    pricing: Pricing | None = None,
     on_progress: Callable[[int, int, CaseReport], None] | None = None,
 ) -> dict:
     started = time.monotonic()
     reports = []
     for i, case in enumerate(cases, 1):
-        rep = run_case(case, deps, executor, price)
+        rep = run_case(case, deps, executor, pricing)
         reports.append(rep)
         if on_progress:
             on_progress(i, len(cases), rep)
@@ -177,7 +182,7 @@ def run_evals(
         "duration_s": round(time.monotonic() - started, 1),
         "model": getattr(deps.llm, "model", ""),
         "router_model": getattr(deps.router_llm, "model", ""),
-        "summary": summarize(reports, price),
+        "summary": summarize(reports),
         "cases": [asdict(r) | {"duration_ms": r.duration_ms} for r in reports],
     }
 

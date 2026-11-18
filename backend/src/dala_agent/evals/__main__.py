@@ -7,6 +7,7 @@ import argparse
 from ..agent.factory import build_deps
 from ..config import get_settings
 from ..db import AgentSQLExecutor
+from ..pricing import Pricing
 from .runner import load_cases, run_evals, save_report
 
 
@@ -30,7 +31,7 @@ def main() -> None:
         if rep.error:
             print(f"           - ошибка: {rep.error}")
 
-    run = run_evals(deps, executor, cases, price=settings.price(), on_progress=progress)
+    run = run_evals(deps, executor, cases, pricing=Pricing(override=settings.price()), on_progress=progress)
     s = run["summary"]
     json_path, md_path = save_report(run)
     print(f"\nПройдено {s['passed']} из {s['cases']} ({s['pass_rate']}%). Отчёт: {md_path}")

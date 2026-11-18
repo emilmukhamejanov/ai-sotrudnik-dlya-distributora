@@ -51,3 +51,37 @@ def test_confirm_flow(client, fake_llm, stub):
 def test_validation(client):
     assert client.post("/chat", json={"message": ""}).status_code == 422
     assert client.post("/chat", json={"message": "x" * 5000}).status_code == 422
+
+
+def test_meta(client):
+    m = client.get("/meta").json()
+    assert m["model"] == "fake-llm" and m["bitrix_mode"] == "stub" and m["demo"] is True
+    assert m["pricing"]["override"] == [3.0, 15.0]
+
+
+def test_saved_eval_reports(client, monkeypatch, tmp_path):
+    import json
+
+    monkeypatch.setattr("dala_agent.evals.runner.REPORTS_DIR", tmp_path)
+    (tmp_path / "20261118-170347.json").write_text(
+        json.dumps({"started_at": "2026-11-18T17:03:47", "model": "m", "summary": {"passed": 32, "cases": 35}}),
+        encoding="utf-8",
+    )
+    reports = client.get("/evals/reports").json()
+    assert reports[0]["name"] == "20261118-170347" and reports[0]["summary"]["passed"] == 32
+    assert client.get("/evals/reports/20261118-170347").json()["model"] == "m"
+    assert client.get("/evals/reports/..%2F..%2Fsecret").status_code == 404
+
+
+def test_cost_by_model():
+    from dala_agent.pricing import Pricing
+
+    p = Pricing()
+    steps = [
+        {"usage": {"model": "claude-haiku-5-5", "input_tokens": 1_000_000, "output_tokens": 0}},
+        {"usage": {"model": "claude-sonnet-5-5", "input_tokens": 1_000_000, "output_tokens": 100_000}},
+        {"usage": None},
+    ]
+    assert p.cost_of_steps(steps) == pytest.approx(0.10 + 2.0 + 1.0)
+    assert p.cost_of_steps([{"usage": {"model": "qwen", "input_tokens": 5, "output_tokens": 1}}]) is None
+    assert Pricing(override=(1.0, 1.0)).cost("qwen", 1_000_000, 0) == 1.0
