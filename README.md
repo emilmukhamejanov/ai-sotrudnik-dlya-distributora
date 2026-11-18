@@ -140,7 +140,8 @@ data/
 docs/data_model.md            модель данных и «ловушки» для text-to-SQL
 docs/agent.md                 граф, инструменты, рубежи защиты, evals, API
 docs/dashboard.md             дашборд: чат, путевой лист ответа, качество и расходы
-docs/deploy.md                Docker, CI, режим публичного демо, размещение
+docs/deploy.md                Docker, CI, режим публичного демо, размещение на Render + Neon
+render.yaml                   Render Blueprint: публичное демо (Docker, бесплатный план)
 Dockerfile, docker-compose.yml  образ агента с дашбордом; база + агент одной командой
 .github/workflows/ci.yml      CI: ruff, pytest на Postgres+pgvector, tsc, vitest, сборка и запуск образа
 ```

@@ -5,8 +5,10 @@
 #   evals — прогон эталонных вопросов на настоящей модели (тратит токены), отчёт в var\evals
 #   ui    — пересобрать дашборд (нужен Node.js 20.19+); в архиве проекта он уже собран
 #   docker-up / docker-down — всё целиком в Docker (база, агент, дашборд), без Python на компьютере
+#   remote-db / remote-db-reset — загрузить схему и демо-данные во внешнюю базу (Neon) для публичного демо
 param(
-    [ValidateSet('setup', 'start', 'stop', 'test', 'reset', 'evals', 'ui', 'docker-up', 'docker-down')]
+    [ValidateSet('setup', 'start', 'stop', 'test', 'reset', 'evals', 'ui', 'docker-up', 'docker-down',
+                 'remote-db', 'remote-db-reset')]
     [string]$Command = 'start'
 )
 
@@ -115,6 +117,28 @@ function Ensure-Ui([switch]$Force) {
     if ($code -ne 0) { Say '  [!] Сборка дашборда не удалась — API всё равно работает (/docs)' 'Yellow' } else { Ok 'Дашборд собран' }
 }
 
+function Invoke-RemoteDb([switch]$Reset) {
+    $remote = Get-EnvValue 'REMOTE_DATABASE_URL'
+    if (-not $remote) {
+        Start-Process notepad.exe $EnvFile
+        Fail "Впишите в .env строку REMOTE_DATABASE_URL=… (строка подключения Neon, вариант без -pooler) и запустите снова."
+    }
+    $agentPwd = Get-EnvValue 'AGENT_DB_PASSWORD'
+    if (-not $agentPwd) { Fail 'В .env нет AGENT_DB_PASSWORD — запустите setup-windows.bat.' }
+    if ($Reset) {
+        $answer = Read-Host 'Удалить во внешней базе схемы erp, analytics, kb и загрузить заново? (y — да, n — нет)'
+        if ($answer -notin @('y', 'Y', 'да')) { Say 'Отменено'; exit 0 }
+    }
+    Ensure-DockerRunning
+    Say 'Загружаю схему и демо-данные во внешнюю базу (psql из контейнера postgres:16)…'
+    $resetValue = if ($Reset) { '1' } else { '0' }
+    docker run --rm -v "${Root}:/work" -w /work -e "DATABASE_URL=$remote" -e "AGENT_DB_PASSWORD=$agentPwd" `
+        -e "RESET=$resetValue" postgres:16 bash db/remote-apply.sh
+    if ($LASTEXITCODE -ne 0) { Fail 'Не получилось — смотрите сообщение выше (часто: неверная строка подключения или нет ?sslmode=require).' }
+    Ok 'Внешняя база готова'
+    Say "`nДля Render понадобятся: DATABASE_URL — та же строка, AGENT_DB_PASSWORD — значение из вашего .env." 'Green'
+}
+
 function Invoke-Setup {
     Say "`n=== Установка ===" 'White'
     $py = Find-Python
@@ -215,6 +239,8 @@ switch ($Command) {
         Start-Process 'http://127.0.0.1:8000/'
     }
     'docker-down' { docker compose down; Ok 'Контейнеры остановлены (данные сохранены)' }
+    'remote-db' { Invoke-RemoteDb }
+    'remote-db-reset' { Invoke-RemoteDb -Reset }
     'evals' {
         if (-not (Test-Path $VenvPy)) { Invoke-Setup }
         Ensure-DockerRunning

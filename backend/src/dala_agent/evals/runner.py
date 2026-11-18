@@ -29,6 +29,17 @@ from .checks import check_turn
 
 CASES_PATH = REPO_ROOT / "evals" / "cases.yaml"
 REPORTS_DIR = REPO_ROOT / "var" / "evals"
+# Отчёты настоящих прогонов, сохранённые в репозитории: их видно и в публичном демо, где evals не запускаются.
+PUBLISHED_DIR = REPO_ROOT / "evals" / "published"
+
+
+def report_paths() -> dict[str, Path]:
+    """Все отчёты по имени: опубликованные и локальные (локальный с тем же именем важнее)."""
+    paths: dict[str, Path] = {}
+    for directory in (PUBLISHED_DIR, REPORTS_DIR):
+        for path in directory.glob("*.json"):
+            paths[path.stem] = path
+    return dict(sorted(paths.items(), reverse=True))
 
 
 def load_cases(path: Path = CASES_PATH, *, ids: list[str] | None = None, categories: list[str] | None = None):

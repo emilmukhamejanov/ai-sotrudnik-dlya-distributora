@@ -39,9 +39,10 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      - appdata:/app/var   # отчёты evals и журнал заглушки Битрикс24
+      # Отчёты evals и журнал заглушки Битрикс24 — в папке var проекта, общей с обычным запуском.
+      # На Linux-хосте папка должна быть доступна на запись пользователю с uid 1000.
+      - ./var:/app/var
     restart: unless-stopped
 
 volumes:
   pgdata:
-  appdata:

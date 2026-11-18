@@ -60,6 +60,7 @@ def test_meta(client):
 
 
 def test_saved_eval_reports(client, monkeypatch, tmp_path):
+    monkeypatch.setattr("dala_agent.evals.runner.PUBLISHED_DIR", tmp_path / "published")
     import json
 
     monkeypatch.setattr("dala_agent.evals.runner.REPORTS_DIR", tmp_path)
@@ -85,3 +86,19 @@ def test_cost_by_model():
     assert p.cost_of_steps(steps) == pytest.approx(0.10 + 2.0 + 1.0)
     assert p.cost_of_steps([{"usage": {"model": "qwen", "input_tokens": 5, "output_tokens": 1}}]) is None
     assert Pricing(override=(1.0, 1.0)).cost("qwen", 1_000_000, 0) == 1.0
+
+
+def test_published_and_local_reports_are_merged(client, monkeypatch, tmp_path):
+    import json
+
+    local, published = tmp_path / "local", tmp_path / "published"
+    local.mkdir()
+    published.mkdir()
+    monkeypatch.setattr("dala_agent.evals.runner.REPORTS_DIR", local)
+    monkeypatch.setattr("dala_agent.evals.runner.PUBLISHED_DIR", published)
+    run = {"started_at": "x", "model": "m", "summary": {"passed": 1, "cases": 35}}
+    (published / "20261118-170347.json").write_text(json.dumps(run), encoding="utf-8")
+    (local / "20261119-100000.json").write_text(json.dumps(run | {"model": "local"}), encoding="utf-8")
+    names = [r["name"] for r in client.get("/evals/reports").json()]
+    assert names == ["20261119-100000", "20261118-170347"]  # новые сверху
+    assert client.get("/evals/reports/20261118-170347").status_code == 200

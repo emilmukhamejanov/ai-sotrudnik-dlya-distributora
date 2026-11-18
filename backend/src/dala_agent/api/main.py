@@ -209,7 +209,7 @@ def create_app(agent: Agent | None = None, demo: DemoGuard | None = None, evals_
         from ..evals import runner
 
         out = []
-        for path in sorted(runner.REPORTS_DIR.glob("*.json"), reverse=True):
+        for path in runner.report_paths().values():
             try:
                 run = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
@@ -225,10 +225,8 @@ def create_app(agent: Agent | None = None, demo: DemoGuard | None = None, evals_
     def eval_report(name: str) -> dict:
         from ..evals import runner
 
-        if not re.fullmatch(r"[0-9-]{8,20}", name):
-            raise HTTPException(404, "Нет такого отчёта")
-        path = runner.REPORTS_DIR / f"{name}.json"
-        if not path.exists():
+        path = runner.report_paths().get(name) if re.fullmatch(r"[0-9-]{8,20}", name) else None
+        if path is None:
             raise HTTPException(404, "Нет такого отчёта")
         return json.loads(path.read_text(encoding="utf-8"))
 

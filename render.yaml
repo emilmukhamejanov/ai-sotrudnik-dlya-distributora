@@ -1,0 +1,31 @@
+# Render Blueprint: публичное демо агента (Docker, бесплатный план).
+# База — внешняя (Neon, бесплатно): схема и данные загружаются заранее windows\remote-db.bat
+# или `DATABASE_URL=… AGENT_DB_PASSWORD=… ./db/remote-apply.sh`.
+services:
+  - type: web
+    name: dala-agent
+    runtime: docker
+    plan: free            # засыпает после 15 минут без запросов; starter ($7) — без засыпания
+    region: frankfurt     # ближайший к Казахстану регион Render
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass   # выкатывать только после зелёного CI
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: DEMO_MODE
+        value: "true"
+      - key: DEMO_DAILY_BUDGET_USD
+        value: "2"
+      - key: DEMO_REQUESTS_PER_HOUR
+        value: "30"
+      - key: EMBEDDINGS_PROVIDER
+        value: hashing
+      # Секреты — вводятся в дашборде Render при создании, в репозиторий не попадают:
+      - key: DATABASE_URL          # строка подключения Neon (прямая, без -pooler), с ?sslmode=require
+        sync: false
+      - key: AGENT_DB_PASSWORD     # тот же пароль роли agent_reader, что при загрузке схемы
+        sync: false
+      - key: ANTHROPIC_API_KEY     # лучше отдельный ключ для демо с месячным лимитом
+        sync: false
+      - key: DEMO_ACCESS_CODE      # латиница и цифры; его вы даёте тем, кому показываете демо
+        sync: false
