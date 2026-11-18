@@ -44,6 +44,7 @@ SQL_SYSTEM = """Ты аналитик дистрибьютора продукт�
 - Только представления из описания ниже; ПДн (ИИН, телефоны, адреса) в них нет и запрашивать их нельзя.
 - Пиши понятные псевдонимы колонок по-русски в двойных кавычках, округляй деньги (ROUND(…, 0)).
 - Не больше {max_rows} строк результата; для рейтингов используй ORDER BY … LIMIT.
+- Запрос компактный: только колонки, нужные для ответа (обычно до 8). Допущения — коротко, 1–3 пункта.
 - Если вопрос не про данные из схемы — верни sql = null и cannot_answer.
 
 {schema}
@@ -128,7 +129,11 @@ class TextToSQLTool:
         for _ in range(self.max_attempts):
             try:
                 draft = self.llm.structured(
-                    system=self.system_prompt(), messages=messages, schema=SQLDraft, purpose="sql_generate"
+                    system=self.system_prompt(),
+                    messages=messages,
+                    schema=SQLDraft,
+                    purpose="sql_generate",
+                    max_tokens=2500,  # длинный запрос со многими колонками не должен обрезаться
                 )
             except LLMError as e:
                 result.error = str(e)
