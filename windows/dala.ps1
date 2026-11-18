@@ -4,8 +4,9 @@
 #   stop  — остановить базу;  test — тесты;  reset — пересоздать базу с нуля
 #   evals — прогон эталонных вопросов на настоящей модели (тратит токены), отчёт в var\evals
 #   ui    — пересобрать дашборд (нужен Node.js 20.19+); в архиве проекта он уже собран
+#   docker-up / docker-down — всё целиком в Docker (база, агент, дашборд), без Python на компьютере
 param(
-    [ValidateSet('setup', 'start', 'stop', 'test', 'reset', 'evals', 'ui')]
+    [ValidateSet('setup', 'start', 'stop', 'test', 'reset', 'evals', 'ui', 'docker-up', 'docker-down')]
     [string]$Command = 'start'
 )
 
@@ -196,6 +197,24 @@ switch ($Command) {
     'stop'  { docker compose stop; Ok 'База остановлена (данные сохранены)' }
     'test'  { Invoke-Test }
     'ui'    { Ensure-Ui -Force }
+    'docker-up' {
+        if (-not (Test-Path $EnvFile)) { Ensure-EnvFile }
+        $provider = Get-EnvValue 'LLM_PROVIDER'
+        if ((-not $provider -or $provider -eq 'anthropic') -and -not (Get-EnvValue 'ANTHROPIC_API_KEY')) {
+            Start-Process notepad.exe $EnvFile
+            Fail 'В .env не заполнен ANTHROPIC_API_KEY. Вставьте ключ в открытом Блокноте, сохраните и запустите снова.'
+        }
+        Ensure-DockerRunning
+        Say 'Собираю образ и поднимаю базу, агента и дашборд (первый раз — несколько минут)…'
+        docker compose up -d --build --wait
+        if ($LASTEXITCODE -ne 0) {
+            Fail 'Контейнеры не запустились. Если открыт start-windows.bat — закройте его (порт 8000 занят). Подробности: docker compose logs app'
+        }
+        Ok 'Работает в Docker'
+        Say "`nДашборд: http://127.0.0.1:8000/  Остановить: windows\docker-down.bat" 'Green'
+        Start-Process 'http://127.0.0.1:8000/'
+    }
+    'docker-down' { docker compose down; Ok 'Контейнеры остановлены (данные сохранены)' }
     'evals' {
         if (-not (Test-Path $VenvPy)) { Invoke-Setup }
         Ensure-DockerRunning

@@ -83,6 +83,14 @@ export interface Meta {
   bitrix_mode: string | null;
   export_date: string | null;
   pricing: { override: [number, number] | null; models: Record<string, { input: number; output: number }> };
+  demo_mode: {
+    enabled: boolean;
+    access_code_required?: boolean;
+    daily_budget_usd?: number;
+    remaining_today_usd?: number;
+    requests_per_hour?: number;
+  };
+  evals_enabled: boolean;
 }
 
 export interface EvalSummary {
@@ -157,12 +165,39 @@ export class ApiError extends Error {
   }
 }
 
+const CODE_KEY = "dala-demo-access-code";
+
+/** Код доступа к публичному демо: вводится один раз и хранится в этом браузере. */
+export const accessCode = {
+  get(): string {
+    try {
+      return localStorage.getItem(CODE_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  },
+  set(code: string) {
+    try {
+      localStorage.setItem(CODE_KEY, code);
+    } catch {
+      /* хранилище недоступно — код живёт до перезагрузки страницы */
+    }
+    memoryCode = code;
+  },
+};
+let memoryCode = "";
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let resp: Response;
+  const code = accessCode.get() || memoryCode;
   try {
     resp = await fetch(path, {
       ...init,
-      headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+      headers: {
+        "content-type": "application/json",
+        ...(code ? { "x-access-code": code } : {}),
+        ...(init?.headers ?? {}),
+      },
     });
   } catch {
     throw new ApiError(0, "Сервер агента не отвечает. Проверьте, что окно start-windows.bat открыто.");

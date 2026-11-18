@@ -48,6 +48,11 @@ export default function Header({ tab, onTab, meta }: Props) {
           <span>
             Битрикс24: <b>{meta.bitrix_mode === "webhook" ? "портал" : "заглушка"}</b>
           </span>
+          {meta.demo_mode.enabled && meta.demo_mode.remaining_today_usd !== undefined && (
+            <span>
+              Демо: на сегодня осталось <b>${meta.demo_mode.remaining_today_usd.toFixed(2).replace(".", ",")}</b>
+            </span>
+          )}
           {meta.export_date && (
             <span>
               Выгрузка 1С на <b>{meta.export_date.split("-").reverse().join(".")}</b>

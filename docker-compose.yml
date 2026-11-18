@@ -1,3 +1,5 @@
+# База: docker compose up -d --wait db   (make db-up)
+# Всё целиком — база, агент и дашборд: docker compose up -d --build --wait   (make up)
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -14,10 +16,32 @@ services:
       - ./data/demo_1c:/opt/data/demo_1c:ro
       - ./db/docker-init.sh:/docker-entrypoint-initdb.d/10-apply.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      # По TCP: во время первичной загрузки демо-данных Postgres слушает только сокет,
+      # поэтому «готов» он будет, лишь когда данные загружены.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
-      retries: 20
+      retries: 30
+
+  app:
+    build: .
+    image: dala-agent:latest
+    env_file: .env
+    environment:
+      # Внутри compose агент ходит в базу из сервиса db, даже если в .env указана внешняя (Supabase).
+      DB_HOST: db
+      DB_PORT: "5432"
+      DATABASE_URL: ""
+      AGENT_DATABASE_URL: ""
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - appdata:/app/var   # отчёты evals и журнал заглушки Битрикс24
+    restart: unless-stopped
 
 volumes:
   pgdata:
+  appdata:

@@ -1,5 +1,7 @@
 # ИИ-сотрудник для дистрибьютора
 
+[![CI](https://github.com/emilmukhamejanov/ai-sotrudnik-dlya-distributora/actions/workflows/ci.yml/badge.svg)](https://github.com/emilmukhamejanov/ai-sotrudnik-dlya-distributora/actions/workflows/ci.yml)
+
 > **Демо-кейс для портфолио.** ТОО «Дала Дистрибьюшн» — вымышленная компания. Все данные (продажи,
 > клиенты, ИИН/БИН, телефоны, договоры) синтетические и сгенерированы кодом из этого репозитория.
 
@@ -19,7 +21,7 @@
 | 2 | Python-ядро: инструменты, граф LangGraph, API на FastAPI — [как устроено](docs/agent.md) | ✅ готово |
 | 3 | Защита (маскирование ПДн, prompt injection, права SQL) и evals — 35 кейсов на Claude, 4 прогона, [подробно](docs/agent.md#evals-этап-3) | ✅ готово |
 | 4 | TypeScript-дашборд: чат, трасса шагов агента, панель качества и стоимости — [что внутри](docs/dashboard.md) | ✅ готово |
-| 5 | Docker, CI (GitHub Actions), деплой демо | ⏳ |
+| 5 | Docker, CI (GitHub Actions), режим публичного демо — [как развернуть](docs/deploy.md) | ✅ готово (деплой — по выбору площадки) |
 
 ## Архитектура (целевая)
 
@@ -56,6 +58,15 @@ flowchart LR
 
 ## Быстрый старт
 
+Проще всего — всё в Docker (нужен только Docker и ключ Claude):
+
+```bash
+cp .env.example .env          # заполните POSTGRES_PASSWORD, AGENT_DB_PASSWORD и ANTHROPIC_API_KEY
+make up                       # база, агент и дашборд — http://127.0.0.1:8000/
+```
+
+Для разработки — Python-окружение и база в Docker:
+
 ```bash
 cp .env.example .env          # заполните POSTGRES_PASSWORD, AGENT_DB_PASSWORD и ANTHROPIC_API_KEY
 make install                  # backend и зависимости (лучше в виртуальном окружении)
@@ -85,8 +96,8 @@ curl -s localhost:8000/chat -H 'content-type: application/json' \
    и открывает дашборд на http://127.0.0.1:8000/ (API — /docs). Если дашборд не собран, а Node.js есть,
    `setup-windows.bat` соберёт его сам.
 
-В папке `windows/` ещё есть `stop.bat` (остановить базу), `test.bat` (тесты), `evals.bat` (прогон evals)
-и `reset-db.bat` (пересоздать базу).
+В папке `windows/` ещё есть `docker-up.bat` / `docker-down.bat` (всё целиком в Docker, Python не нужен),
+`stop.bat` (остановить базу), `test.bat` (тесты), `evals.bat` (прогон evals) и `reset-db.bat` (пересоздать базу).
 
 ```sql
 SELECT doc_month, round(sum(amount_kzt) / 1e6, 1) AS выручка_млн
@@ -129,6 +140,9 @@ data/
 docs/data_model.md            модель данных и «ловушки» для text-to-SQL
 docs/agent.md                 граф, инструменты, рубежи защиты, evals, API
 docs/dashboard.md             дашборд: чат, путевой лист ответа, качество и расходы
+docs/deploy.md                Docker, CI, режим публичного демо, размещение
+Dockerfile, docker-compose.yml  образ агента с дашбордом; база + агент одной командой
+.github/workflows/ci.yml      CI: ruff, pytest на Postgres+pgvector, tsc, vitest, сборка и запуск образа
 ```
 
 ## Стек

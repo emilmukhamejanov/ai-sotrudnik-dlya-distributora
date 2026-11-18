@@ -67,6 +67,16 @@ class Settings(BaseSettings):
     # --- API ---
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    # --- Публичное демо (см. api/demo.py) ---
+    demo_mode: bool = False
+    demo_access_code: SecretStr | None = None
+    demo_daily_budget_usd: float = Field(2.0, ge=0)
+    demo_requests_per_hour: int = Field(30, ge=1)
+    evals_api_enabled: bool | None = None  # по умолчанию: выключен в демо-режиме, включён локально
+
+    def evals_enabled(self) -> bool:
+        return (not self.demo_mode) if self.evals_api_enabled is None else self.evals_api_enabled
+
     def service_dsn(self) -> str:
         if self.database_url:
             return self.database_url

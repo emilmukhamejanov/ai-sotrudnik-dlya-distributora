@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 from ..agent.service import Agent
 from ..config import REPO_ROOT, get_settings
 from ..llm import LLMError
+from .demo import DemoGuard
 
 log = logging.getLogger("dala_agent.api")
 
@@ -77,8 +78,18 @@ def get_agent(request: Request) -> Agent:
 AgentDep = Annotated[Agent, Depends(get_agent)]
 
 
-def create_app(agent: Agent | None = None) -> FastAPI:
-    """agent можно передать готовым (тесты); иначе он собирается из настроек при старте."""
+def create_app(agent: Agent | None = None, demo: DemoGuard | None = None, evals_enabled: bool = True) -> FastAPI:
+    """agent можно передать готовым (тесты); иначе он и режим демо собираются из настроек при старте."""
+    if agent is None:
+        settings = get_settings()
+        demo = demo or DemoGuard(
+            enabled=settings.demo_mode,
+            access_code=settings.demo_access_code.get_secret_value() if settings.demo_access_code else None,
+            daily_budget_usd=settings.demo_daily_budget_usd,
+            requests_per_hour=settings.demo_requests_per_hour,
+        )
+        evals_enabled = settings.evals_enabled()
+    demo = demo or DemoGuard()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -108,7 +119,8 @@ def create_app(agent: Agent | None = None) -> FastAPI:
         return {"status": "ok"}
 
     @app.post("/chat", response_model=TurnResponse)
-    def chat(req: ChatRequest, agent: AgentDep) -> dict:
+    def chat(req: ChatRequest, agent: AgentDep, request: Request) -> dict:
+        demo.check(request)
         thread_id = req.thread_id or uuid.uuid4().hex
         with thread_lock(thread_id):
             try:
@@ -116,10 +128,13 @@ def create_app(agent: Agent | None = None) -> FastAPI:
             except LLMError as e:
                 log.exception("Ошибка модели")
                 raise HTTPException(502, f"Модель недоступна: {e}") from e
+        u = result.usage
+        demo.record(u.get("cost_usd"), u.get("input_tokens", 0), u.get("output_tokens", 0))
         return asdict(result)
 
     @app.post("/chat/{thread_id}/confirm", response_model=TurnResponse)
-    def confirm(thread_id: str, req: ConfirmRequest, agent: AgentDep) -> dict:
+    def confirm(thread_id: str, req: ConfirmRequest, agent: AgentDep, request: Request) -> dict:
+        demo.check(request)
         with thread_lock(thread_id):
             try:
                 result = agent.confirm(thread_id, approved=req.approved, action_id=req.action_id)
@@ -149,6 +164,10 @@ def create_app(agent: Agent | None = None) -> FastAPI:
     def eval_run(req: EvalRunRequest, agent: AgentDep) -> dict:
         from ..evals import load_cases, run_evals, save_report, to_markdown
 
+        if not evals_enabled:
+            raise HTTPException(
+                403, "Запуск evals в публичном демо выключен: прогон стоит денег. История прогонов доступна."
+            )
         with eval_lock:
             if any(r["status"] == "running" for r in eval_runs.values()):
                 raise HTTPException(409, "Прогон evals уже идёт")
@@ -226,6 +245,8 @@ def create_app(agent: Agent | None = None) -> FastAPI:
             "bitrix_mode": getattr(deps.bitrix, "mode", None),
             "export_date": getattr(schema, "export_date", None),
             "pricing": agent.pricing.as_dict(),
+            "demo_mode": demo.status(),
+            "evals_enabled": evals_enabled,
         }
 
     @app.get("/chat/{thread_id}/pending")

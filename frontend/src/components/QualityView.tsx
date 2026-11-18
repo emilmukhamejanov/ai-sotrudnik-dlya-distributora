@@ -130,7 +130,17 @@ export default function QualityView({ meta, sessionTurns }: Props) {
           </div>
 
           <div>
-            <RunEvals onDone={(name) => loadReports(name)} lastCost={reports?.[0]?.summary.cost_usd ?? null} />
+            {meta?.evals_enabled === false ? (
+              <section className="panel">
+                <h2>Проверить агента</h2>
+                <p className="panel-sub">
+                  В публичном демо запуск выключен: прогон всех вопросов стоит денег. Слева — прогоны, которые автор
+                  сделал на настоящей модели.
+                </p>
+              </section>
+            ) : (
+              <RunEvals onDone={(name) => loadReports(name)} lastCost={reports?.[0]?.summary.cost_usd ?? null} />
+            )}
             {report && <RunCost report={report} />}
             <SessionCost turns={sessionTurns} meta={meta} />
           </div>

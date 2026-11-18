@@ -16,7 +16,7 @@ from .graph import AgentDeps
 
 
 def build_bitrix(settings: Settings):
-    if settings.bitrix_mode == "webhook":
+    if settings.bitrix_mode == "webhook" and not settings.demo_mode:  # публичное демо — только заглушка
         if not settings.bitrix_webhook_url:
             raise ValueError("Для BITRIX_MODE=webhook задайте BITRIX_WEBHOOK_URL")
         return BitrixWebhookClient(settings.bitrix_webhook_url.get_secret_value())

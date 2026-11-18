@@ -1,8 +1,10 @@
-.PHONY: help install data test test-db lint db-up db-down db-reset db-apply psql-agent index api evals ui ui-dev
+.PHONY: help up down install data test test-db lint db-up db-down db-reset db-apply psql-agent index api evals ui ui-dev
 
 PY ?= python3
 
 help:
+	@echo "make up         — всё в Docker: база, агент, дашборд на http://127.0.0.1:8000/"
+	@echo "make down       — остановить контейнеры (данные сохраняются)"
 	@echo "make install    — установить backend с зависимостями (pip install -e)"
 	@echo "make data       — перегенерировать демо-выгрузку «из 1С» (детерминированно)"
 	@echo "make test       — тесты (интеграционные с базой — только если задан TEST_DATABASE_URL)"
@@ -63,3 +65,9 @@ ui:
 
 ui-dev:
 	cd frontend && npm install && npm run dev
+
+up:
+	docker compose up -d --build --wait
+
+down:
+	docker compose down

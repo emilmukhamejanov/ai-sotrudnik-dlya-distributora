@@ -13,6 +13,8 @@ interface Props {
   onReset: () => void;
   resolutions: Record<string, Resolution>;
   exportDate: string | null;
+  needCode: boolean;
+  onCode: (code: string) => void;
 }
 
 const STARTERS: { title: string; questions: string[] }[] = [
@@ -48,6 +50,7 @@ const STARTERS: { title: string; questions: string[] }[] = [
 export default function DialogView(props: Props) {
   const { entries, selected, onSelect, busy, onSend, onConfirm, onReset, resolutions } = props;
   const [draft, setDraft] = useState("");
+  const [code, setCode] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -134,6 +137,29 @@ export default function DialogView(props: Props) {
         </div>
 
         <div className="composer">
+          {props.needCode && (
+            <form
+              className="code-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (code.trim()) props.onCode(code);
+              }}
+            >
+              <label htmlFor="access-code">Это публичное демо — введите код доступа, его дал автор проекта.</label>
+              <div className="btn-row">
+                <input
+                  id="access-code"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  autoComplete="off"
+                  autoFocus
+                />
+                <button className="btn btn-primary" type="submit">
+                  Продолжить
+                </button>
+              </div>
+            </form>
+          )}
           <div className="composer-inner">
             <textarea
               ref={inputRef}
