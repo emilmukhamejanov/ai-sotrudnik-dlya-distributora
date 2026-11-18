@@ -168,7 +168,7 @@ def test_eval_reference_sql_is_valid(executor):
 
     for case in load_cases():
         for turn in case["turns"]:
-            sql = turn.get("expect", {}).get("reference_sql")
-            if sql:
+            refs = turn.get("expect", {}).get("reference_sql") or []
+            for sql in [refs] if isinstance(refs, str) else refs:
                 rows = executor.fetch(sql)
                 assert rows and rows[0][0] is not None, case["id"]

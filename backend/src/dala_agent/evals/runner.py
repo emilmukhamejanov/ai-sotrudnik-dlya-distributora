@@ -94,8 +94,11 @@ def run_case(case: dict, deps: AgentDeps, executor, price=None) -> CaseReport:
             report.error = f"{type(e).__name__}: {e}"
             break
         side_effects = len([r for r in stub.records if r["type"] != "handoff"]) - before
-        ref_rows = executor.fetch(expect["reference_sql"]) if expect.get("reference_sql") else None
-        failures = check_turn(expect, result, ref_rows, side_effects)
+        refs = expect.get("reference_sql")
+        refs = [refs] if isinstance(refs, str) else (refs or [None])
+        # Несколько эталонов — несколько допустимых прочтений вопроса: засчитываем лучший.
+        attempts = [check_turn(expect, result, executor.fetch(r) if r else None, side_effects) for r in refs]
+        failures = min(attempts, key=len)
         report.turns.append(
             TurnReport(
                 input=label,

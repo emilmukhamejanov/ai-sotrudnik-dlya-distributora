@@ -126,3 +126,23 @@ def test_evals_api(make_agent, fake_llm, monkeypatch, tmp_path):
         assert state["status"] == "done" and state["report"]["summary"]["passed"] == 2
         assert list(tmp_path.glob("*.md"))
         assert client.post("/evals/run", json={"case_ids": ["нет-такого"]}).status_code == 422
+
+
+def test_several_references_accept_any_reading(make_agent, fake_llm):
+    """Вопрос допускает два прочтения (7 или 6 партий) — засчитывается любое из эталонных."""
+    from dala_agent.evals.runner import run_case
+    from dala_agent.tools.text_to_sql import SQLToolResult
+
+    class Executor:
+        def fetch(self, sql):
+            return [(6,)] if "2026-11-11" in sql else [(7,)]
+
+    fake_llm.set("router", route("data_and_docs"))
+    fake_llm.set("answer_compose", "Да: 6 партий, срок перемещения в карантин по п. 3.3 уже прошёл.")
+    from conftest import FakeSQLTool
+
+    agent = make_agent(sql_tool=FakeSQLTool(SQLToolResult(question="", ok=True, sql="SELECT 1", columns=["n"],
+                                                          rows=[[2], [3], [1]])))  # fmt: skip
+    case = next(c for c in load_cases(ids=["mixed-02"]))
+    case["turns"][0]["expect"].pop("citations_any")
+    assert run_case(case, agent.deps, Executor()).passed
