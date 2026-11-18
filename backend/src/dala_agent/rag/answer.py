@@ -124,7 +124,7 @@ class DocsTool:
         """search_query — ключевые слова от роутера (переформулировка вопроса языком регламентов);
         rules_only — смешанный вопрос: нужны только правила, цифры посчитает text-to-SQL."""
         started = time.monotonic()
-        chunks = self.retriever.search(f"{question} {search_query}".strip(), top_k=self.top_k)
+        chunks = self.retriever.search(question, extra=search_query, top_k=self.top_k)
         result = DocsResult(question=question, found=False, answer="", chunks=chunks)
         if not chunks:
             result.duration_ms = int((time.monotonic() - started) * 1000)

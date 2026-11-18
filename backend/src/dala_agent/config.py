@@ -55,8 +55,8 @@ class Settings(BaseSettings):
 
     # --- Инструменты ---
     sql_max_rows: int = Field(200, ge=1, le=5000)
-    sql_max_attempts: int = Field(2, ge=1, le=4)
-    rag_top_k: int = Field(6, ge=1, le=20)
+    sql_max_attempts: int = Field(3, ge=1, le=4)
+    rag_top_k: int = Field(8, ge=1, le=20)
 
     # --- Битрикс24 ---
     # stub — заглушка (действия пишутся в журнал), webhook — реальный REST через входящий вебхук.

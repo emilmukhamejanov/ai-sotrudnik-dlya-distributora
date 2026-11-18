@@ -104,7 +104,7 @@ class SQLToolResult:
 
 
 class TextToSQLTool:
-    def __init__(self, *, llm: LLMClient, executor, schema: SchemaContext, max_rows: int = 200, max_attempts: int = 2):
+    def __init__(self, *, llm: LLMClient, executor, schema: SchemaContext, max_rows: int = 200, max_attempts: int = 3):
         self.llm = llm
         self.executor = executor
         self.schema = schema

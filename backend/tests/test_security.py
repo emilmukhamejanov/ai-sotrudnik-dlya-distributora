@@ -167,7 +167,7 @@ def test_docs_tool_flags_by_code_not_model():
     )  # fmt: skip
 
     class R:
-        def search(self, q, top_k=6):
+        def search(self, q, extra="", top_k=6):
             return [chunk]
 
     llm = FakeLLM(

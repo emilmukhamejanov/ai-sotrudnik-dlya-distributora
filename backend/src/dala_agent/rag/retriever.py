@@ -60,8 +60,8 @@ class RetrievedChunk:
         }
 
 
-def lexical_query(text: str) -> str | None:
-    """Вопрос → tsquery для конфигурации simple: значимые слова по префиксу через OR.
+def lexical_terms(text: str) -> list[str]:
+    """Значимые слова → термы tsquery для конфигурации simple (по префиксу).
 
     Префикс — грубая замена стемминга, которой хватает для русского и казахского: длинные слова — первые
     5 букв («скидка», «скидку», «скидки» → скидк:*), слова из 4–5 букв — без последней («цены» → цен:*).
@@ -78,6 +78,12 @@ def lexical_query(text: str) -> str | None:
             term = f"{token[:5]}:*"
         if term not in terms:
             terms.append(term)
+    return terms
+
+
+def lexical_query(text: str) -> str | None:
+    """Вопрос → tsquery: значимые слова через OR."""
+    terms = lexical_terms(text)
     return " | ".join(terms) if terms else None
 
 
@@ -87,26 +93,42 @@ class Retriever:
         self.embedder = embedder
         self._candidates = candidates
 
-    def search(self, query: str, *, top_k: int = 6) -> list[RetrievedChunk]:
-        tsq = lexical_query(query)
+    def search(self, query: str, *, extra: str = "", top_k: int = 6) -> list[RetrievedChunk]:
+        """query — вопрос пользователя; extra — ключевые слова от роутера (синонимы языком регламентов).
+
+        Полнотекстовая часть ранжирует по охвату: сколько разных слов запроса нашлось в пункте, причём
+        слова самого вопроса весят вдвое больше синонимов — иначе широкая переформулировка уводит поиск.
+        """
+        q_terms = lexical_terms(query)
+        x_terms = [t for t in lexical_terms(extra) if t not in q_terms]
+        tsq = " | ".join(q_terms + x_terms) or None
         params = {
-            "vec": to_pgvector(self.embedder.embed_query(query)),
+            "vec": to_pgvector(self.embedder.embed_query(f"{query} {extra}".strip())),
             "tsq": tsq or "",
+            "qterms": q_terms,
+            "xterms": x_terms,
             "k": self._candidates,
             "top": top_k,
             "rrf": RRF_K,
         }
         lex_cte = (
             """
-            lex AS (
+            lex_raw AS (
                 -- к тексту пункта добавляем название документа: «регламент», «письмо поставщика» и т.п.
-                SELECT c.id, row_number() OVER (ORDER BY ts_rank_cd(c.tsv || dt.tsv, q.t) DESC) AS rnk
+                SELECT c.id,
+                       2 * (SELECT count(*) FROM unnest(%(qterms)s::text[]) w
+                            WHERE (c.tsv || dt.tsv) @@ to_tsquery('simple', w))
+                       + (SELECT count(*) FROM unnest(%(xterms)s::text[]) w
+                          WHERE (c.tsv || dt.tsv) @@ to_tsquery('simple', w)) AS cover,
+                       ts_rank_cd(c.tsv || dt.tsv, q.t) AS rank
                 FROM kb.chunks c
                 JOIN (SELECT id, to_tsvector('simple', title) AS tsv FROM kb.documents) dt
                   ON dt.id = c.document_id, q
                 WHERE (c.tsv || dt.tsv) @@ q.t
-                ORDER BY ts_rank_cd(c.tsv || dt.tsv, q.t) DESC
-                LIMIT %(k)s
+            ),
+            lex AS (
+                SELECT id, row_number() OVER (ORDER BY cover DESC, rank DESC) AS rnk
+                FROM lex_raw ORDER BY cover DESC, rank DESC LIMIT %(k)s
             )"""
             if tsq
             else "lex AS (SELECT NULL::bigint AS id, NULL::bigint AS rnk WHERE false)"

@@ -88,7 +88,7 @@ class FakeRetriever:
     def __init__(self, chunks):
         self.chunks = chunks
 
-    def search(self, query, *, top_k=6):
+    def search(self, query, *, extra="", top_k=6):
         return self.chunks[:top_k]
 
 

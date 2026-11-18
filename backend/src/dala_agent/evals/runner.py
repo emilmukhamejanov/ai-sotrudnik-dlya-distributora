@@ -55,6 +55,7 @@ class TurnReport:
     duration_ms: int
     input_tokens: int
     output_tokens: int
+    notes: list[str] = field(default_factory=list)  # ошибки инструментов из трассы — чтобы понять причину провала
 
 
 @dataclass
@@ -108,11 +109,24 @@ def run_case(case: dict, deps: AgentDeps, executor, price=None) -> CaseReport:
                 duration_ms=result.duration_ms,
                 input_tokens=result.usage.get("input_tokens", 0),
                 output_tokens=result.usage.get("output_tokens", 0),
+                notes=_trace_notes(result.trace),
             )
         )
         if failures:
             report.passed = False
     return report
+
+
+def _trace_notes(trace: list[dict]) -> list[str]:
+    notes = []
+    for s in trace:
+        d = s.get("detail") or {}
+        if d.get("error"):
+            notes.append(f"{s['node']}: {d['error'][:300]}")
+        for a in d.get("attempts") or []:
+            if a.get("error"):
+                notes.append(f"sql: {a['error'][:300]}")
+    return notes
 
 
 def summarize(reports: list[CaseReport], price=None) -> dict:
@@ -195,6 +209,7 @@ def to_markdown(run: dict) -> str:
                     lines.append(f"- «{t['input']}» → маршрут {t['route']}, статус {t['status']}")
                     lines += [f"  - {x}" for x in t["failures"]]
                     lines.append(f"  - ответ: {t['answer'][:300].replace(chr(10), ' ')}")
+                    lines += [f"  - трасса: {n}" for n in t.get("notes", [])]
             lines.append("")
     return "\n".join(lines)
 
