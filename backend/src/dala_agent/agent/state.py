@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal, TypedDict
 
 from ..llm.base import Usage
 
-Route = Literal["data", "docs", "data_and_docs", "action", "human", "smalltalk"]
+Route = Literal["data", "docs", "data_and_docs", "action", "human", "smalltalk", "blocked"]
 
 TURN_FIELDS_RESET: dict[str, Any] = {
     "route": None,
@@ -40,6 +40,9 @@ class AgentState(TypedDict, total=False):
     answer: str | None
     citations: list[dict]
     status: Literal["done", "needs_confirmation", "needs_clarification"]
+    # ПДн: метка → реальное значение (в проде — шифрованное хранилище с TTL, а не чекпойнт)
+    pii_vault: dict[str, str]
+    pii_found: dict[str, int]  # что найдено в последнем сообщении, без значений
 
 
 _KK_LETTERS = re.compile(r"[әғқңөұүһі]", re.I)

@@ -1,4 +1,4 @@
-.PHONY: help install data test test-db lint db-up db-down db-reset db-apply psql-agent index api
+.PHONY: help install data test test-db lint db-up db-down db-reset db-apply psql-agent index api evals
 
 PY ?= python3
 
@@ -13,6 +13,7 @@ help:
 	@echo "make psql-agent — консоль под ролью агента (только analytics, только чтение)"
 	@echo "make index      — проиндексировать документы в kb (эмбеддинги по EMBEDDINGS_PROVIDER)"
 	@echo "make api        — запустить API на http://127.0.0.1:8000 (документация — /docs)"
+	@echo "make evals      — эталонные вопросы на настоящей модели (тратит токены), отчёт в var/evals"
 	@echo "make test-db    — интеграционные тесты на живой базе (TEST_DATABASE_URL, TEST_AGENT_DATABASE_URL)"
 
 data:
@@ -51,3 +52,6 @@ index:
 
 api:
 	cd backend && PYTHONPATH=src $(PY) -m uvicorn dala_agent.api.main:create_app --factory --reload --port 8000
+
+evals:
+	cd backend && PYTHONPATH=src $(PY) -m dala_agent.evals

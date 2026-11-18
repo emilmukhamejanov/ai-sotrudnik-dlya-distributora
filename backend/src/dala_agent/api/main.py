@@ -6,6 +6,9 @@ POST /chat                       — сообщение пользователя
 POST /chat/{thread_id}/confirm   — «да» / «нет» для действия в Битрикс24
 GET  /chat/{thread_id}/pending   — действие, ожидающее подтверждения
 GET  /health                     — проверка
+GET  /evals/cases                — эталонные вопросы
+POST /evals/run                  — запустить прогон в фоне (тратит токены!)
+GET  /evals/runs/{run_id}        — прогресс и отчёт
 """
 
 from __future__ import annotations
@@ -38,6 +41,11 @@ class ConfirmRequest(BaseModel):
     action_id: str | None = Field(
         None, description="id действия из pending_action; обязателен при approved=true — защита от устаревших «да»"
     )
+
+
+class EvalRunRequest(BaseModel):
+    case_ids: list[str] | None = None
+    categories: list[str] | None = None
 
 
 class TurnResponse(BaseModel):
@@ -114,6 +122,62 @@ def create_app(agent: Agent | None = None) -> FastAPI:
             except ValueError as e:
                 raise HTTPException(422, str(e)) from e
         return asdict(result)
+
+    eval_runs: dict[str, dict] = {}
+    eval_lock = threading.Lock()
+
+    @app.get("/evals/cases")
+    def eval_cases() -> list[dict]:
+        from ..evals import load_cases
+
+        return [
+            {
+                "id": c["id"],
+                "category": c["category"],
+                "turns": [t.get("message", "[подтверждение]") for t in c["turns"]],
+            }
+            for c in load_cases()
+        ]
+
+    @app.post("/evals/run")
+    def eval_run(req: EvalRunRequest, agent: AgentDep) -> dict:
+        from ..evals import load_cases, run_evals, save_report, to_markdown
+
+        with eval_lock:
+            if any(r["status"] == "running" for r in eval_runs.values()):
+                raise HTTPException(409, "Прогон evals уже идёт")
+            cases = load_cases(ids=req.case_ids, categories=req.categories)
+            if not cases:
+                raise HTTPException(422, "Нет кейсов под такой фильтр")
+            run_id = uuid.uuid4().hex[:8]
+            state = {"run_id": run_id, "status": "running", "done": 0, "total": len(cases), "results": []}
+            eval_runs[run_id] = state
+
+        def progress(i, total, rep):
+            state["done"] = i
+            state["results"].append(
+                {"id": rep.id, "passed": rep.passed, "failures": [f for t in rep.turns for f in t.failures]}
+            )
+
+        def work():
+            try:
+                run = run_evals(
+                    agent.deps, agent.deps.sql_tool.executor, cases, price=agent._price, on_progress=progress
+                )
+                json_path, md_path = save_report(run)
+                state.update(status="done", report=run, markdown=to_markdown(run), saved_to=str(md_path))
+            except Exception as e:  # noqa: BLE001
+                log.exception("Ошибка прогона evals")
+                state.update(status="error", error=f"{type(e).__name__}: {e}")
+
+        threading.Thread(target=work, name=f"evals-{run_id}", daemon=True).start()
+        return {"run_id": run_id, "total": len(cases)}
+
+    @app.get("/evals/runs/{run_id}")
+    def eval_status(run_id: str) -> dict:
+        if run_id not in eval_runs:
+            raise HTTPException(404, "Нет такого прогона")
+        return eval_runs[run_id]
 
     @app.get("/chat/{thread_id}/pending")
     def pending(thread_id: str, agent: AgentDep) -> dict:

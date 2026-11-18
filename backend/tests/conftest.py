@@ -34,6 +34,7 @@ class FakeSQLTool:
             usage=Usage("fake", 100, 20),
         )
         self.calls: list[dict] = []
+        self.executor = None  # evals берут executor отсюда; в unit-тестах эталонный SQL не нужен
 
     def run(self, question, *, history=None, rules_context=""):
         self.calls.append({"question": question, "history": history, "rules_context": rules_context})

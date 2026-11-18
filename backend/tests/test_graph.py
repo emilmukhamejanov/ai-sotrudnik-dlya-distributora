@@ -60,11 +60,31 @@ def test_suspicious_document_is_flagged(make_agent, fake_llm):
             answer="По письму ТОО «Шай Үйі» цены на чай вырастут на 6% с 01.12.2026.",
             citations=[{"slug": "pismo-postavshika-izmenenie-cen", "section": None, "citation": "Письмо"}],
             suspicious_instructions=True,
+            sanitized=[{"slug": "pismo-postavshika-izmenenie-cen", "section": None, "removed_comments": 1,
+                        "removed_paragraphs": 1}],
         )
-    )
+    )  # fmt: skip
     r = make_agent(docs_tool=docs).chat("t", "Что пишет поставщик чая?")
     assert "проигнорировал" in r.answer
     assert "25%" not in r.answer
+
+
+def test_no_warning_when_flagged_document_not_used(make_agent, fake_llm):
+    """Письмо с атакой нашлось поиском, но ответ по регламенту — предупреждение не нужно."""
+    fake_llm.set("router", route("docs"))
+    docs = FakeDocsTool(
+        DocsResult(
+            question="",
+            found=True,
+            answer="До 4% (п. 2.1).",
+            citations=[{"slug": "politika-cen-i-skidok", "section": "2.1", "citation": "Положение, п. 2.1"}],
+            suspicious_instructions=True,
+            sanitized=[{"slug": "pismo-postavshika-izmenenie-cen", "section": None, "removed_comments": 1,
+                        "removed_paragraphs": 1}],
+        )
+    )  # fmt: skip
+    r = make_agent(docs_tool=docs).chat("t", "Скидка HoReCa?")
+    assert r.answer == "До 4% (п. 2.1)."
 
 
 def test_data_and_docs_passes_rules_to_sql(make_agent, fake_llm):

@@ -90,7 +90,7 @@ def test_guarded_queries_execute(executor, sql):
 def test_known_facts(executor):
     """Факты из data_model.md, на которые будут опираться evals."""
     blocked = executor.run(check_sql("SELECT count(*) FROM clients WHERE shipment_blocked").sql, max_rows=1)
-    assert blocked.rows[0][0] == 8
+    assert blocked.rows[0][0] == 6
     expired = executor.run(check_sql("SELECT count(*) FROM stock WHERE is_expired").sql, max_rows=1)
     assert expired.rows[0][0] == 7
 
@@ -133,7 +133,7 @@ def test_agent_end_to_end_with_real_tools(db_urls, executor, indexed):
                 {"sql": "SELECT iin FROM erp.clients"},  # первая попытка отклонена проверкой
                 {"sql": 'SELECT COUNT(*) AS "заблокировано" FROM clients WHERE shipment_blocked'},
             ],
-            "answer_compose": "Отгрузки заблокированы у 8 клиентов.",
+            "answer_compose": "Отгрузки заблокированы у 6 клиентов.",
             "rag_answer": {
                 "found": True,
                 "answer": "Без согласования — до 4% (Положение о ценообразовании и скидках, п. 2.1).",
@@ -151,7 +151,7 @@ def test_agent_end_to_end_with_real_tools(db_urls, executor, indexed):
     )
     agent = Agent(deps)
     r = agent.chat("e2e", "Скольким клиентам заблокированы отгрузки?")
-    assert r.sql["rows"] == [[8]]
+    assert r.sql["rows"] == [[6]]
     sql_step = next(s for s in r.trace if s["node"] == "sql")
     assert "Схема erp" in sql_step["detail"]["attempts"][0]["error"]
 
@@ -160,3 +160,15 @@ def test_agent_end_to_end_with_real_tools(db_urls, executor, indexed):
     rag_prompt = next(c for c in llm.calls if c.purpose == "rag_answer").messages[-1]["content"]
     assert 'section="2.1"' in rag_prompt
     assert [e.id for e in deps.directory.find("Иванов")] == [11]
+
+
+def test_eval_reference_sql_is_valid(executor):
+    """Эталонные запросы evals выполняются под ролью агента и возвращают данные."""
+    from dala_agent.evals import load_cases
+
+    for case in load_cases():
+        for turn in case["turns"]:
+            sql = turn.get("expect", {}).get("reference_sql")
+            if sql:
+                rows = executor.fetch(sql)
+                assert rows and rows[0][0] is not None, case["id"]

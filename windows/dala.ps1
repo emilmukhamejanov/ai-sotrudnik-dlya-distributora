@@ -2,8 +2,9 @@
 #   setup — Python-окружение, зависимости, .env с паролями базы
 #   start — база в Docker, индексация документов, API на http://127.0.0.1:8000
 #   stop  — остановить базу;  test — тесты;  reset — пересоздать базу с нуля
+#   evals — прогон эталонных вопросов на настоящей модели (тратит токены), отчёт в var\evals
 param(
-    [ValidateSet('setup', 'start', 'stop', 'test', 'reset')]
+    [ValidateSet('setup', 'start', 'stop', 'test', 'reset', 'evals')]
     [string]$Command = 'start'
 )
 
@@ -174,6 +175,13 @@ switch ($Command) {
     'start' { Invoke-Start }
     'stop'  { docker compose stop; Ok 'База остановлена (данные сохранены)' }
     'test'  { Invoke-Test }
+    'evals' {
+        if (-not (Test-Path $VenvPy)) { Invoke-Setup }
+        Ensure-DockerRunning
+        docker compose up -d --wait db
+        & $VenvPy -m dala_agent.rag.indexer
+        & $VenvPy -m dala_agent.evals
+    }
     'reset' {
         $answer = Read-Host 'Удалить базу со всеми данными и создать заново? (y — да, n — нет)'
         if ($answer -notin @('y', 'Y', 'да')) { Say 'Отменено'; exit 0 }

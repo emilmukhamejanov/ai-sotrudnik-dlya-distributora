@@ -9,6 +9,7 @@ from typing import Any
 from langgraph.types import Command
 
 from ..config import Settings
+from ..pii import PiiVault
 from .graph import AgentDeps, build_graph
 
 
@@ -51,12 +52,25 @@ class Agent:
     def chat(self, thread_id: str, message: str) -> TurnResult:
         before = self._trace_len(thread_id)
         started = time.monotonic()
+        # ПДн заменяются метками ДО графа: в модель, чекпойнт истории и трассу попадает только текст с метками.
+        vault = self._vault(thread_id)
+        masked, found = vault.mask(message)
         # Новое сообщение во время ожидания подтверждения начинает новый ход: старое действие
         # не выполняется (для выполнения нужен явный confirm).
         self.graph.invoke(
-            {"question": message, "messages": [{"role": "user", "content": message}]}, self._config(thread_id)
+            {
+                "question": masked,
+                "messages": [{"role": "user", "content": masked}],
+                "pii_vault": vault.to_dict(),
+                "pii_found": found,
+            },
+            self._config(thread_id),
         )
         return self._result(thread_id, before, started)
+
+    def _vault(self, thread_id: str) -> PiiVault:
+        snap = self.graph.get_state(self._config(thread_id))
+        return PiiVault.from_dict(snap.values.get("pii_vault") if snap and snap.values else None)
 
     def confirm(self, thread_id: str, *, approved: bool, action_id: str | None = None) -> TurnResult:
         snap = self.graph.get_state(self._config(thread_id))
@@ -80,6 +94,12 @@ class Agent:
         pending = snap.interrupts[0].value if snap.interrupts else None
         status = "needs_confirmation" if pending else v.get("status") or "done"
         answer = pending["preview"] if pending else (v.get("answer") or "")
+        # Пользователю показываем его же данные вместо меток.
+        vault = PiiVault.from_dict(v.get("pii_vault"))
+        answer = vault.unmask(answer)
+        if pending:
+            pending = {**pending, "action": {k: vault.unmask(x) if isinstance(x, str) else x
+                                             for k, x in pending["action"].items()}}  # fmt: skip
         return TurnResult(
             thread_id=thread_id,
             status=status,

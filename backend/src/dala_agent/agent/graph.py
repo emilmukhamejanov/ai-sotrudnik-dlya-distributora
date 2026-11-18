@@ -25,7 +25,9 @@ from langgraph.types import interrupt
 
 from ..actions.bitrix import BitrixClient, PlannedAction
 from ..actions.directory import EmployeeDirectory
+from ..injection import is_prompt_attack
 from ..llm.base import LLMClient, LLMError
+from ..pii import PiiVault, redact_output
 from .prompts import (
     ACTION_SYSTEM,
     COMPOSE_SYSTEM,
@@ -57,10 +59,26 @@ def _history(state: AgentState) -> list[dict]:
 
 
 def build_graph(deps: AgentDeps, checkpointer=None):
+    def guard(state: AgentState) -> dict:
+        """Первый узел хода: сообщает о скрытых ПДн и отклоняет попытки переписать правила агента."""
+        started = time.monotonic()
+        update: dict = dict(TURN_FIELDS_RESET)
+        trace = []
+        found = state.get("pii_found") or {}
+        if found:
+            kinds = ", ".join(f"{k}: {n}" for k, n in found.items())
+            trace.append(step("guard", "ПДн скрыты до отправки в модель", started, found=found, kinds=kinds))
+        if is_prompt_attack(state["question"]):
+            lang = detect_language(state["question"]) or "ru"
+            update.update(route="blocked", language=lang, answer=t(lang, "prompt_attack"))
+            trace.append(step("guard", "Сообщение отклонено: попытка изменить правила агента", started))
+        update["trace"] = trace
+        return update
+
     def router(state: AgentState) -> dict:
         started = time.monotonic()
         question = state["question"]
-        update: dict = dict(TURN_FIELDS_RESET)
+        update: dict = {}
         try:
             res = deps.router_llm.structured(
                 system=ROUTER_SYSTEM,
@@ -107,7 +125,10 @@ def build_graph(deps: AgentDeps, checkpointer=None):
         docs_res = state.get("docs_result")
         sql_res = state.get("sql_result")
         citations = docs_res.get("citations", []) if docs_res else []
-        suffix = ("\n\n" + t(lang, "suspicious")) if docs_res and docs_res.get("suspicious_instructions") else ""
+        # Предупреждаем, только если в ответе использован документ, из которого защита вырезала инструкции.
+        flagged = {x["slug"] for x in (docs_res or {}).get("sanitized", [])}
+        used_flagged = bool(flagged & {c["slug"] for c in citations})
+        suffix = ("\n\n" + t(lang, "suspicious")) if used_flagged else ""
 
         if sql_res is None:  # только документы
             if docs_res and docs_res.get("found"):
@@ -223,7 +244,10 @@ def build_graph(deps: AgentDeps, checkpointer=None):
         started = time.monotonic()
         lang = state.get("language", "ru")
         action = PlannedAction(**state["pending_action"])
-        res = deps.bitrix.execute(action)
+        # Реальные значения ПДн (телефон из просьбы пользователя) попадают только в сам Битрикс24.
+        vault = PiiVault.from_dict(state.get("pii_vault"))
+        real = PlannedAction(**{k: vault.unmask(v) if isinstance(v, str) else v for k, v in asdict(action).items()})
+        res = deps.bitrix.execute(real)
         what = t(lang, "task" if action.kind == "create_task" else "deal")
         answer = (
             t(lang, "action_done", what=what, ext=res.external_id)
@@ -246,10 +270,12 @@ def build_graph(deps: AgentDeps, checkpointer=None):
         if sql_res and not sql_res.get("ok") and not sql_res.get("cannot_answer"):
             reason = t(lang, "handoff_reason_sql")
         thread_id = config.get("configurable", {}).get("thread_id", "")
-        ticket = deps.bitrix.handoff(thread_id=thread_id, reason=reason, question=state["question"])
+        vault = PiiVault.from_dict(state.get("pii_vault"))
+        ticket = deps.bitrix.handoff(thread_id=thread_id, reason=reason, question=vault.unmask(state["question"]))
+        stored = {**asdict(ticket), "question": state["question"]}  # в состоянии — только с метками
         return {
             "answer": t(lang, "handoff", ticket=ticket.ticket_id),
-            "handoff": asdict(ticket),
+            "handoff": stored,
             "trace": [step("handoff", "Передано человеку", started, ticket=ticket.ticket_id, reason=reason)],
         }
 
@@ -257,17 +283,24 @@ def build_graph(deps: AgentDeps, checkpointer=None):
         return {"answer": smalltalk_text(state.get("language", "ru"))}
 
     def finalize(state: AgentState) -> dict:
-        return {"messages": [{"role": "assistant", "content": state.get("answer") or ""}]}
+        started = time.monotonic()
+        answer, hidden = redact_output(state.get("answer") or "", PiiVault.from_dict(state.get("pii_vault")))
+        update: dict = {"answer": answer, "messages": [{"role": "assistant", "content": answer}]}
+        if hidden:
+            update["trace"] = [step("finalize", f"Из ответа скрыто ПДн: {hidden}", started, hidden=hidden)]
+        return update
 
     g = StateGraph(AgentState)
     for name, fn in [
-        ("router", router), ("docs", docs), ("sql", sql), ("compose", compose), ("plan_action", plan_action),
-        ("confirm", confirm), ("execute", execute), ("handoff", handoff), ("smalltalk", smalltalk),
-        ("finalize", finalize),
+        ("guard", guard), ("router", router), ("docs", docs), ("sql", sql), ("compose", compose),
+        ("plan_action", plan_action), ("confirm", confirm), ("execute", execute), ("handoff", handoff),
+        ("smalltalk", smalltalk), ("finalize", finalize),
     ]:  # fmt: skip
         g.add_node(name, fn)
 
-    g.add_edge(START, "router")
+    g.add_edge(START, "guard")
+    g.add_conditional_edges("guard", lambda s: "finalize" if s.get("route") == "blocked" else "router",
+                            ["router", "finalize"])  # fmt: skip
     g.add_conditional_edges(
         "router",
         lambda s: {
