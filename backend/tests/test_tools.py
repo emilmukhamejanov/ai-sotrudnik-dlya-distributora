@@ -142,6 +142,7 @@ def test_all_documents_parse():
 
 def test_lexical_query():
     assert lexical_query("Какая максимальная скидка для HoReCa?") == "макси:* | скидк:* | horec:*"
+    assert lexical_query("цены на чай") == "цен:* | чай"
     assert lexical_query("как это") is None
     assert lexical_query("НДС 16 и 2026") == "ндс | 16 | 2026"
 

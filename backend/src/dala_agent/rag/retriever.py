@@ -63,14 +63,19 @@ class RetrievedChunk:
 def lexical_query(text: str) -> str | None:
     """Вопрос → tsquery для конфигурации simple: значимые слова по префиксу через OR.
 
-    Префикс из первых 5 букв — грубая замена стемминга, которой хватает для русского и казахского
-    («скидка», «скидку», «скидки» → скидк:*).
+    Префикс — грубая замена стемминга, которой хватает для русского и казахского: длинные слова — первые
+    5 букв («скидка», «скидку», «скидки» → скидк:*), слова из 4–5 букв — без последней («цены» → цен:*).
     """
     terms: list[str] = []
     for token in re.findall(r"\w+", text.lower()):
         if token in STOPWORDS or (len(token) < 3 and not token.isdigit()):
             continue
-        term = f"{token[:5]}:*" if len(token) > 5 and not token.isdigit() else token
+        if token.isdigit() or len(token) <= 3:
+            term = token
+        elif len(token) <= 5:
+            term = f"{token[:-1]}:*"
+        else:
+            term = f"{token[:5]}:*"
         if term not in terms:
             terms.append(term)
     return " | ".join(terms) if terms else None
@@ -94,10 +99,13 @@ class Retriever:
         lex_cte = (
             """
             lex AS (
-                SELECT c.id, row_number() OVER (ORDER BY ts_rank_cd(c.tsv, q.t) DESC) AS rnk
-                FROM kb.chunks c, q
-                WHERE c.tsv @@ q.t
-                ORDER BY ts_rank_cd(c.tsv, q.t) DESC
+                -- к тексту пункта добавляем название документа: «регламент», «письмо поставщика» и т.п.
+                SELECT c.id, row_number() OVER (ORDER BY ts_rank_cd(c.tsv || dt.tsv, q.t) DESC) AS rnk
+                FROM kb.chunks c
+                JOIN (SELECT id, to_tsvector('simple', title) AS tsv FROM kb.documents) dt
+                  ON dt.id = c.document_id, q
+                WHERE (c.tsv || dt.tsv) @@ q.t
+                ORDER BY ts_rank_cd(c.tsv || dt.tsv, q.t) DESC
                 LIMIT %(k)s
             )"""
             if tsq

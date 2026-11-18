@@ -96,14 +96,24 @@ def build_graph(deps: AgentDeps, checkpointer=None):
         update.update(
             route=decision.route,
             route_reason=decision.reason,
+            search_query=decision.search_query.strip(),
             language=detect_language(question) or decision.language,
         )
-        update["trace"] = [step("router", f"Маршрут: {decision.route}", started, res.usage, reason=decision.reason)]
+        update["trace"] = [
+            step("router", f"Маршрут: {decision.route}", started, res.usage, reason=decision.reason,
+                 search_query=decision.search_query)
+        ]  # fmt: skip
         return update
 
     def docs(state: AgentState) -> dict:
         started = time.monotonic()
-        res = deps.docs_tool.run(state["question"], language=state.get("language", "ru"), history=_history(state))
+        res = deps.docs_tool.run(
+            state["question"],
+            language=state.get("language", "ru"),
+            history=_history(state),
+            search_query=state.get("search_query") or "",
+            rules_only=state.get("route") == "data_and_docs",
+        )
         title = "Документы: найдено" if res.found else "Документы: ответа нет"
         return {
             "docs_result": res.as_dict(),

@@ -52,8 +52,10 @@ class FakeDocsTool:
         )
         self.calls: list[dict] = []
 
-    def run(self, question, *, language="ru", history=None):
-        self.calls.append({"question": question, "language": language})
+    def run(self, question, *, language="ru", history=None, search_query="", rules_only=False):
+        self.calls.append(
+            {"question": question, "language": language, "search_query": search_query, "rules_only": rules_only}
+        )
         return self.result
 
 

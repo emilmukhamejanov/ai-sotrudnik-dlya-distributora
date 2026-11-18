@@ -244,3 +244,15 @@ def test_trace_is_per_turn(make_agent, fake_llm):
     agent.chat("t", "Сколько продали?")
     r = agent.chat("t", "Спасибо!")
     assert titles(r) == ["Маршрут: smalltalk"]
+
+
+def test_router_search_query_and_rules_mode_reach_docs(make_agent, fake_llm):
+    """Роутер переформулирует вопрос для поиска; в смешанном вопросе документы ищут только правила."""
+    fake_llm.set(
+        "router",
+        {"route": "data_and_docs", "language": "ru", "reason": "т", "search_query": "истёкший срок годности карантин"},
+    )
+    docs = FakeDocsTool()
+    make_agent(docs_tool=docs).chat("t", "Есть ли просроченные партии, которые пора в карантин?")
+    assert docs.calls[0]["search_query"] == "истёкший срок годности карантин"
+    assert docs.calls[0]["rules_only"] is True

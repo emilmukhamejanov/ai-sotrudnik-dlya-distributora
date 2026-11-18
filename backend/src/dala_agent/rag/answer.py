@@ -49,6 +49,13 @@ RAG_SYSTEM = """Ты ИИ-сотрудник ТОО «Дала Дистрибь�
 """
 
 
+RULES_ONLY = """
+Это смешанный вопрос: цифры по нему посчитает отдельный инструмент по учётным данным, их здесь нет и не нужно.
+Твоя задача — изложить ПРАВИЛА компании, нужные для ответа (сроки, пороги, порядок действий), со ссылками на
+пункты. found=true, если такие правила во фрагментах есть, даже если на вопрос целиком они не отвечают.
+"""
+
+
 @dataclass
 class DocsResult:
     question: str
@@ -105,9 +112,19 @@ class DocsTool:
         self.retriever = retriever
         self.top_k = top_k
 
-    def run(self, question: str, *, language: str = "ru", history: list[Message] | None = None) -> DocsResult:
+    def run(
+        self,
+        question: str,
+        *,
+        language: str = "ru",
+        history: list[Message] | None = None,
+        search_query: str = "",
+        rules_only: bool = False,
+    ) -> DocsResult:
+        """search_query — ключевые слова от роутера (переформулировка вопроса языком регламентов);
+        rules_only — смешанный вопрос: нужны только правила, цифры посчитает text-to-SQL."""
         started = time.monotonic()
-        chunks = self.retriever.search(question, top_k=self.top_k)
+        chunks = self.retriever.search(f"{question} {search_query}".strip(), top_k=self.top_k)
         result = DocsResult(question=question, found=False, answer="", chunks=chunks)
         if not chunks:
             result.duration_ms = int((time.monotonic() - started) * 1000)
@@ -117,7 +134,7 @@ class DocsTool:
         user = f"Фрагменты документов:\n\n{render_fragments(chunks, result.sanitized)}\n\nВопрос: {question}"
         try:
             res = self.llm.structured(
-                system=RAG_SYSTEM.format(language=lang, removed_note=REMOVED_NOTE),
+                system=RAG_SYSTEM.format(language=lang, removed_note=REMOVED_NOTE) + (RULES_ONLY if rules_only else ""),
                 messages=[*(history or []), {"role": "user", "content": user}],
                 schema=DocsAnswer,
                 purpose="rag_answer",

@@ -14,6 +14,7 @@ Route = Literal["data", "docs", "data_and_docs", "action", "human", "smalltalk",
 TURN_FIELDS_RESET: dict[str, Any] = {
     "route": None,
     "route_reason": None,
+    "search_query": "",
     "sql_result": None,
     "docs_result": None,
     "pending_action": None,
@@ -32,6 +33,7 @@ class AgentState(TypedDict, total=False):
     language: Literal["ru", "kk"]
     route: Route | None
     route_reason: str | None
+    search_query: str  # переформулировка вопроса для поиска по документам (от роутера)
     sql_result: dict | None
     docs_result: dict | None
     pending_action: dict | None
