@@ -7,11 +7,13 @@ import json
 import httpx
 import pytest
 
-from dala_agent.agent.prompts import RouteDecision
+from dala_agent.agent.prompts import ActionDraft, RouteDecision
 from dala_agent.config import Settings
 from dala_agent.llm import LLMError, build_llms
-from dala_agent.llm.anthropic_client import AnthropicLLM
+from dala_agent.llm.anthropic_client import AnthropicLLM, json_schema
 from dala_agent.llm.openai_client import OpenAICompatibleLLM
+from dala_agent.rag.answer import DocsAnswer
+from dala_agent.tools.text_to_sql import SQLDraft
 
 
 def transport(handler, lib=httpx):
@@ -36,29 +38,68 @@ def anthropic_http():
         return httpx
 
 
-def test_anthropic_structured_uses_forced_tool():
+def test_anthropic_structured_uses_output_config():
+    """Structured Outputs (output_config.format), а не принудительный вызов инструмента:
+    tool_choice "tool" Claude Sonnet 5.5 отклоняет с ошибкой 400."""
+
     def handler(body):
         return httpx.Response(
             200,
             json={
                 "id": "msg_1", "type": "message", "role": "assistant", "model": body["model"],
-                "stop_reason": "tool_use", "stop_sequence": None,
-                "content": [{"type": "tool_use", "id": "tu_1", "name": body["tools"][0]["name"],
-                             "input": {"route": "docs", "language": "ru", "reason": "правила"}}],
+                "stop_reason": "end_turn", "stop_sequence": None,
+                "content": [{"type": "text", "text": '{"route": "docs", "language": "ru", "reason": "правила"}'}],
                 "usage": {"input_tokens": 120, "output_tokens": 15},
             },
         )  # fmt: skip
 
     client, sent = transport(handler, anthropic_http())
-    llm = AnthropicLLM(api_key="test", model="claude-haiku-5-5", http_client=client)
+    llm = AnthropicLLM(api_key="test", model="claude-sonnet-5-5", http_client=client)
     res = llm.structured(
         system="s", messages=[{"role": "user", "content": "q"}], schema=RouteDecision, purpose="router"
     )
     assert res.value.route == "docs" and res.usage.input_tokens == 120
     req = sent[0]
-    assert req["tool_choice"] == {"type": "tool", "name": "submit_route_decision"}
-    assert req["tools"][0]["input_schema"]["properties"]["route"]["enum"][0] == "data"
+    assert "tools" not in req and "tool_choice" not in req
+    fmt = req["output_config"]["format"]
+    assert fmt["type"] == "json_schema"
+    assert fmt["schema"]["additionalProperties"] is False
+    assert fmt["schema"]["properties"]["route"]["enum"][0] == "data"
     assert req["system"] == "s"
+
+
+@pytest.mark.parametrize("schema", [RouteDecision, ActionDraft, DocsAnswer, SQLDraft])
+def test_all_schemas_are_strict(schema):
+    """Каждый объект в схеме закрыт (additionalProperties: false) — требование Structured Outputs."""
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("type") == "object":
+                assert node.get("additionalProperties") is False, node.get("title")
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(json_schema(schema))
+
+
+def test_anthropic_refusal_is_error():
+    client, _ = transport(
+        lambda body: httpx.Response(
+            200,
+            json={
+                "id": "m", "type": "message", "role": "assistant", "model": body["model"], "stop_reason": "refusal",
+                "stop_sequence": None, "content": [], "usage": {"input_tokens": 1, "output_tokens": 0},
+            },
+        ),
+        anthropic_http(),
+    )  # fmt: skip
+    with pytest.raises(LLMError, match="отказался"):
+        AnthropicLLM(api_key="k", model="m", http_client=client).structured(
+            system="s", messages=[], schema=RouteDecision, purpose="router"
+        )
 
 
 def test_anthropic_text_and_error():

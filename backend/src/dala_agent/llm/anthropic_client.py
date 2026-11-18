@@ -1,11 +1,16 @@
-"""Claude через официальный SDK. Структурированный ответ — принудительный вызов инструмента."""
+"""Claude через официальный SDK.
+
+Структурированный ответ — Structured Outputs (output_config.format = json_schema): Claude возвращает
+JSON строго по схеме Pydantic. Этот способ поддерживают все модели; принудительный вызов инструмента
+(tool_choice: tool) новые модели вроде Claude Sonnet 5.5 не принимают.
+"""
 
 from __future__ import annotations
 
 import anthropic
 from pydantic import BaseModel, ValidationError
 
-from .base import LLMError, Message, StructuredResult, T, TextResult, Usage, tool_schema
+from .base import LLMError, Message, StructuredResult, T, TextResult, Usage
 
 
 class AnthropicLLM:
@@ -26,11 +31,7 @@ class AnthropicLLM:
     def text(self, *, system: str, messages: list[Message], purpose: str, max_tokens: int = 1024) -> TextResult:
         try:
             resp = self._client.messages.create(
-                model=self.model,
-                system=system,
-                messages=messages,
-                max_tokens=max_tokens,
-                metadata={"user_id": f"dala-agent:{purpose}"},
+                model=self.model, system=system, messages=messages, max_tokens=max_tokens
             )
         except anthropic.APIError as e:
             raise LLMError(f"Claude API ({purpose}): {e}") from e
@@ -40,33 +41,30 @@ class AnthropicLLM:
     def structured(
         self, *, system: str, messages: list[Message], schema: type[T], purpose: str, max_tokens: int = 1024
     ) -> StructuredResult[T]:
-        tool_name = _tool_name(schema)
         try:
             resp = self._client.messages.create(
                 model=self.model,
                 system=system,
                 messages=messages,
                 max_tokens=max_tokens,
-                tools=[
-                    {
-                        "name": tool_name,
-                        "description": (schema.__doc__ or "Ответ в структурированном виде").strip(),
-                        "input_schema": tool_schema(schema),
-                    }
-                ],
-                tool_choice={"type": "tool", "name": tool_name},
-                metadata={"user_id": f"dala-agent:{purpose}"},
+                output_config={"format": {"type": "json_schema", "schema": json_schema(schema)}},
             )
         except anthropic.APIError as e:
             raise LLMError(f"Claude API ({purpose}): {e}") from e
-        for block in resp.content:
-            if block.type == "tool_use" and block.name == tool_name:
-                try:
-                    return StructuredResult(value=schema.model_validate(block.input), usage=self._usage(resp))
-                except ValidationError as e:
-                    raise LLMError(f"Claude вернул ответ не по схеме ({purpose}): {e}") from e
-        raise LLMError(f"Claude не вернул структурированный ответ ({purpose})")
+        if resp.stop_reason == "refusal":
+            raise LLMError(f"Claude отказался отвечать ({purpose})")
+        if resp.stop_reason == "max_tokens":
+            raise LLMError(f"Ответ Claude обрезан по max_tokens ({purpose})")
+        text = "".join(block.text for block in resp.content if block.type == "text")
+        try:
+            return StructuredResult(value=schema.model_validate_json(text), usage=self._usage(resp))
+        except ValidationError as e:
+            raise LLMError(f"Claude вернул ответ не по схеме ({purpose}): {e}") from e
 
 
-def _tool_name(schema: type[BaseModel]) -> str:
-    return "submit_" + "".join("_" + c.lower() if c.isupper() else c for c in schema.__name__).lstrip("_")
+def json_schema(schema: type[BaseModel]) -> dict:
+    """Схема Pydantic в формате, который принимает Structured Outputs.
+
+    SDK-хелпер добавляет additionalProperties: false и переносит неподдерживаемые ограничения в описания.
+    """
+    return anthropic.transform_schema(schema)
