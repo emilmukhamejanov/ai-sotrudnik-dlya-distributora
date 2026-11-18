@@ -152,14 +152,27 @@ def test_openai_falls_back_to_json_mode():
     assert "JSON Schema" in sent[1]["messages"][0]["content"]
 
 
-def test_build_llms_requires_keys():
+ENV_VARS = (
+    "DATABASE_URL", "AGENT_DATABASE_URL", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "DB_HOST", "DB_PORT",
+    "AGENT_DB_USER", "AGENT_DB_PASSWORD", "ANTHROPIC_API_KEY", "LLM_PROVIDER", "OPENAI_MODEL",
+)  # fmt: skip
+
+
+@pytest.fixture
+def clean_env(monkeypatch):
+    """Настройки читают и переменные окружения (в CI там DATABASE_URL) — тесты конфигурации от них изолируем."""
+    for name in ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_build_llms_requires_keys(clean_env):
     with pytest.raises(LLMError, match="ANTHROPIC_API_KEY"):
         build_llms(Settings(_env_file=None))
     with pytest.raises(LLMError, match="OPENAI_MODEL"):
         build_llms(Settings(_env_file=None, llm_provider="openai"))
 
 
-def test_dsn_building():
+def test_dsn_building(clean_env):
     s = Settings(_env_file=None, postgres_password="p@ss", agent_db_password="a/b")
     assert s.service_dsn() == "postgresql://dala:p%40ss@127.0.0.1:5432/dala"
     assert s.agent_dsn() == "postgresql://agent_reader:a%2Fb@127.0.0.1:5432/dala"
